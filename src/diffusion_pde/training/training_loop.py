@@ -21,6 +21,7 @@ def train(
     '''
     log_dir = get_repo_root() / "logs"
     wandb_kwargs.update({"dir": str(log_dir)})
+    
     with wandb.init(**wandb_kwargs) as run:
 
     # log hyperparameters

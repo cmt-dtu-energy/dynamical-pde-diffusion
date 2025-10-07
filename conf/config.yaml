@@ -1,0 +1,14 @@
+defaults:
+  - dataset: heat_eq
+  - model: unet
+
+wandb:
+  entity: 'philiphohwy-danmarks-tekniske-universitet-dtu'
+  project: 'dynamical-pde-diffusion'
+
+hydra:
+  run:
+    dir: ${oc.env:REPO_ROOT,${hydra:runtime.cwd}}/logs/hydra/${now:%Y-%m-%d_%H-%M-%S}
+  sweep:
+    dir: ${oc.env:REPO_ROOT,${hydra:runtime.cwd}}/logs/hydra_multirun
+    subdir: ${hydra.job.num}

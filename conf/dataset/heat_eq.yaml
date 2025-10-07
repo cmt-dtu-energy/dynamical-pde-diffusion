@@ -1,0 +1,12 @@
+data:
+  name: 'Heat Equation'
+  datapath: 'data/heat_eq_data_1000_64_64_64_0_20.npz'
+
+training:
+  batch_size: 64
+  test_split: 0.2
+  shuffle: True
+  generator_seed: 42
+  num_epochs: 10
+  learning_rate: 1e-3
+  weight_decay: 0.0

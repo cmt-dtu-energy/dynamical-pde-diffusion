@@ -1,3 +1,3 @@
-from .dataset import DiffusionDataset
+from .dataset import DiffusionDataset, get_dataloaders
 
-__all__ = ['DiffusionDataset']
+__all__ = ['DiffusionDataset', 'get_dataloaders']

@@ -40,9 +40,14 @@ class DiffusionDataset(torch.utils.data.Dataset):
         self.init_state = torch.from_numpy(init_state).float()
         self.data = torch.from_numpy(data).float()
         self.labels = torch.from_numpy(labels).float() if labels is not None else None
+        if self.labels is not None and self.labels.ndim == 1:
+            self.labels = self.labels.reshape((-1, 1))  # ensure labels is (N, label_dim):
         self.t_steps = torch.from_numpy(t_steps).float()
 
         self.N, self.T = data.shape[0], data.shape[-1]
+
+        self.input_ch = self.init_state.shape[1] + self.data.shape[1]
+        self.label_ch = 1 + (self.labels.shape[1] if self.labels is not None else 0)
 
         self.g = generator
 
@@ -62,3 +67,58 @@ class DiffusionDataset(torch.utils.data.Dataset):
         if self.labels is not None:
             label = torch.cat((torch.tensor([label]), self.labels[idx]), dim=0)
         return X, label
+    
+
+def get_dataloaders(
+    datapath: str,
+    batch_size: int,
+    test_split: float = 0.2,
+    shuffle: bool = False,
+    generator: Optional[torch.Generator] = None,
+) -> tuple[torch.utils.data.DataLoader, torch.utils.data.DataLoader, torch.utils.data.DataLoader]:
+    """
+    Utility function to load dataset from .npz file and create train, val, test dataloaders.
+
+    Parameters
+    ----------
+    datapath : str
+        Path to the .npz file containing the dataset.
+    batch_size : int
+        Batch size for the dataloaders.
+    test_split : float, optional
+        Fraction of data to use for testing, by default 0.1.
+    shuffle : bool, optional
+        Whether to shuffle the dataset before splitting, by default True.
+    generator : Optional[torch.Generator], optional
+        Random number generator for reproducibility, by default None.
+
+    Returns
+    -------
+    tuple[torch.utils.data.DataLoader, torch.utils.data.DataLoader, torch.utils.data.DataLoader]
+        Train, validation, and test dataloaders.
+    """
+    # load data from .npz file
+    npz = np.load(datapath)
+    init_state = npz['A']  # shape (N, ch_a, h, w)
+    data = npz['U']        # shape (N, ch_u, h, w, T)
+    t_steps = npz['t_steps']     # shape (T,)
+    labels = npz['labels'] if 'labels' in npz else None  # shape (N,) or (N, label_dim)
+
+    dataset = DiffusionDataset(init_state, data, t_steps, labels=labels, generator=generator)
+
+    N = len(dataset)
+    indices = torch.randperm(N, generator=generator)
+
+    test_size = int(test_split * N)
+    train_size = N - test_size
+
+    train_indices = indices[:train_size]
+    test_indices = indices[train_size:]
+
+    train_dataset = torch.utils.data.Subset(dataset, train_indices)
+    test_dataset = torch.utils.data.Subset(dataset, test_indices)
+
+    train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=batch_size, shuffle=shuffle)
+    test_loader = torch.utils.data.DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
+
+    return train_loader, test_loader

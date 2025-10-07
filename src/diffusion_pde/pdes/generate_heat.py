@@ -3,6 +3,7 @@ import torch
 import numpy as np
 from pathlib import Path
 from scipy.io import savemat
+from diffusion_pde.utils import get_repo_root
 
 # Code for generating 2D heat equation data with linear Dirichlet BCs using sine basis transforms.
 # The method is a batched sine-pseudo-spectral method with lifting to handle non-homogeneous BCs.
@@ -241,7 +242,7 @@ def main():
     print("computation done, saving data.")
     t_string = f"{T:.2f}".replace('.', '_')
     save_name = f"heat_eq_data_{N}_{S}_{S}_{steps}_{t_string}.npz"
-    save_path = Path(u"C:\\Users\\Phill\\Documents\\School\\MSc\\4. Sem\\Diffusion\\dynamical-pde-diffusion\\data") / save_name
+    save_path = get_repo_root() / "data" / save_name
     np.savez(save_path, U=U, A=A, t_steps=t_steps, labels=labels)
 
 
