@@ -1,3 +1,4 @@
+from pathlib import Path
 import hydra
 from omegaconf import DictConfig, OmegaConf
 import diffusion_pde as dpde
@@ -10,6 +11,7 @@ from torch.utils.data import DataLoader, Subset
 def main(cfg):
 
     # load dataset configuration
+    dataset_name = cfg.dataset.data.name
     datapath = cfg.dataset.data.datapath
     batch_size = cfg.dataset.training.batch_size
     test_split = cfg.dataset.training.test_split
@@ -28,8 +30,9 @@ def main(cfg):
 
     # load wandb configuration
     wandb_kwargs = OmegaConf.to_container(cfg.wandb)
-    wandb_kwargs["dir"] = dpde.utils.get_repo_root() / "logs"
 
+    # model save path:
+    model_save_path = Path(cfg.model_save_path)
 
     # setup data loader
     generator = torch.Generator().manual_seed(generator_seed)
@@ -74,6 +77,8 @@ def main(cfg):
         weight_decay=weight_decay,
         wandb_kwargs=wandb_kwargs
     )
+
+    torch.save(edm.state_dict(), model_save_path / f"edm_model_{dataset_name}.pth")
 
 if __name__ == "__main__":
     main()
