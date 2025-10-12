@@ -6,6 +6,7 @@ wandb:
   entity: 'philiphohwy-danmarks-tekniske-universitet-dtu'
   project: 'dynamical-pde-diffusion'
   dir: ${oc.env:REPO_ROOT,${hydra:runtime.cwd}}/logs
+  name: None
 
 hydra:
   run:

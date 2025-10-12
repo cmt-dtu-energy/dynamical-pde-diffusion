@@ -1,9 +1,11 @@
 import math
 import torch
 import numpy as np
+import h5py
 from pathlib import Path
 from scipy.io import savemat
 from diffusion_pde.utils import get_repo_root
+from diffusion_pde.pdes import save_dataset
 
 # Code for generating 2D heat equation data with linear Dirichlet BCs using sine basis transforms.
 # The method is a batched sine-pseudo-spectral method with lifting to handle non-homogeneous BCs.
@@ -110,7 +112,7 @@ def random_gaussian_blobs(B: int, N: int, X: torch.Tensor, Y: torch.Tensor, *,
 def heat_timeseries_linear_bc(
     B: int,                 # batch size    
     steps: int,             # number of time steps to simulate
-    dt: float,              # time step size
+    dt: torch.Tensor,       # time step sizes (B,)
     alpha: torch.Tensor,    # (B,) diffusivities
     a: torch.Tensor,        # (B,) BC coeff for constant term
     b: torch.Tensor,        # (B,) BC coeff for x term
@@ -161,12 +163,12 @@ def heat_timeseries_linear_bc(
     # Broadcast shapes
     lam2d = lam2d.unsqueeze(0)                                 # (1,S,S)
     alpha = alpha.view(B, 1, 1).to(device=device, dtype=dtype) # (B,1,1)
-    decay = torch.exp(-alpha * lam2d * dt)                     # (B,S,S)
 
     V_hat_t = V_hat.clone()
     for n in range(1, steps+1):
+        decay = torch.exp(-alpha * lam2d * dt[n-1])            # (B,S,S)
         V_hat_t = V_hat_t * decay                              # (B,S,S)
-        v_t = sine2d_inverse(V_hat_t, S_dst)                       # (B,S,S)
+        v_t = sine2d_inverse(V_hat_t, S_dst)                   # (B,S,S)
         u_t = v_t + w                                          # add the lift back
         u_ts[:, :, :, n] = u_t
 
@@ -181,7 +183,7 @@ def generate_heat(
         B: int,                 # Batch size
         S: int,                 # grid size (S x S)
         steps: int,             # number of time steps to simulate
-        dt: float,              # time step size
+        dt: torch.Tensor,       # time step sizes (B,)
         Lx: float = 1.0,        # domain size in x
         Ly: float = 1.0,        # domain size in y
         alpha_logrange: tuple = (-2.0, 0.0),  # diffusivity range (log-uniform)
@@ -197,11 +199,15 @@ def generate_heat(
     A = torch.empty((N, 1, S, S), dtype=dtype)
     labels = torch.empty(N, dtype=dtype)
 
-    for i in range(N // B + 1):
-        if i == N // B:
-            B = N % B
-            if B == 0:
-                break
+    B0 = B
+    n_full = N // B0
+    rem = N % B0
+    start = 0
+    for i in range(N // B0):
+        this_B = B0 if i < n_full else rem
+        if this_B == 0:
+            break
+        end = start + this_B
 
         alpha = torch.exp(torch.empty(B).uniform_(*alpha_logrange)).to(device=device, dtype=dtype)      # log-uniform in [1e-2, 1]
         a = torch.empty(B).uniform_(-0.5, 0.5).to(device=device, dtype=dtype)
@@ -214,12 +220,13 @@ def generate_heat(
             device=device, dtype=dtype, ic_seed=ic_seed,
         )
 
-        A[i*B:(i+1)*B, 0, :, :] = u_ts[..., 0].cpu()
-        U[i*B:(i+1)*B, 0, :, :, :] = u_ts.cpu()
-        labels[i*B:(i+1)*B] = alpha.cpu()
+        A[start:end, 0, :, :] = u_ts[..., 0].cpu()
+        U[start:end, 0, :, :, :] = u_ts.cpu()
+        labels[start:end] = alpha.cpu()
+        start = end
 
-        t_steps = np.arange(steps+1) * dt
-
+        t_steps = np.concatenate((np.zeros(1), dt.cpu().numpy().cumsum()))  # (steps+1,)
+    labels = labels.view(-1, 1)  # (N,1)
     return U.numpy(), A.numpy(), t_steps, labels.numpy()
 
 def main():
@@ -227,23 +234,47 @@ def main():
     N = 1000
     S = 64
     steps = 64
-    T = 0.2
-    dt = T / steps
+    T = 0.5
+    Lx, Ly = 1.0, 1.0
+    TT = torch.logspace(-4, math.log10(T), steps+1)  # log-scale time steps
+    dt = TT[1:] - TT[:-1]  # (steps,)
+    #dt = (T / steps) * torch.ones(steps)  # uniform time steps
     device = "cuda" if torch.cuda.is_available() else "cpu"
     dtype = torch.float32
     seed = 123
 
-    print(f"generating heat equation data.\n  N = {N}, S = {S}, B = {B}, T = {T:.4f}, steps = {steps}")
+    num_train = 800
+
+    print(f"generating heat equation data with time discretization in log scale.\n  N = {N}, S = {S}, B = {B}, T = {T:.4f}, steps = {steps}")
 
     U, A, t_steps, labels = generate_heat(
         N=N, B=B, S=S, steps=steps, dt=dt,
+        Lx=Lx, Ly=Ly, alpha_logrange=(-2.0, 0.0),
         device=device, dtype=dtype, ic_seed=seed,
     )
     print("computation done, saving data.")
-    t_string = f"{T:.2f}".replace('.', '_')
-    save_name = f"heat_eq_data_{N}_{S}_{S}_{steps}_{t_string}.npz"
+    save_name = f"heat_logt.hdf5"
     save_path = get_repo_root() / "data" / save_name
-    np.savez(save_path, U=U, A=A, t_steps=t_steps, labels=labels)
+
+    save_dataset(
+        filepath=str(save_path),
+        A_train=A[:num_train],
+        U_train=U[:num_train],
+        labels_train=labels[:num_train],
+        A_test=A[num_train:],
+        U_test=U[num_train:],
+        labels_test=labels[num_train:],
+        t_steps=t_steps,
+        T=T,
+        dx=Lx/(S-1),
+        name="heat_logt",
+        description="2D heat equation with linear Dirichlet BCs, data generated with sine-pseudospectral method with lifting. Time steps in log-scale.",
+        S=S,
+        Lx=Lx,
+        Ly=Ly,
+        alpha_logrange=(-2.0, 0.0),
+        steps=steps,
+    )
 
 
 if __name__ == "__main__":

@@ -30,25 +30,22 @@ def main(cfg):
 
     # load wandb configuration
     wandb_kwargs = OmegaConf.to_container(cfg.wandb)
+    if wandb_kwargs["name"] == "None":
+        wandb_kwargs["name"] = None
 
     # model save path:
     model_save_path = Path(cfg.model_save_path)
 
-    # setup data loader
-    generator = torch.Generator().manual_seed(generator_seed)
-
-    trainloader, _ = dpde.datasets.get_dataloaders(
+    trainloader = dpde.datasets.get_dataloader(
         datapath=datapath,
         batch_size=batch_size,
-        test_split=test_split,
         shuffle=shuffle,
-        generator=generator,
     )
 
 
     # set up for training
-    ch_in = trainloader.dataset.dataset.input_ch
-    label_ch = trainloader.dataset.dataset.label_ch
+    ch_in = trainloader.dataset.input_ch
+    label_ch = trainloader.dataset.label_ch
     chs = [ch_in] + chs
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -82,9 +79,3 @@ def main(cfg):
 
 if __name__ == "__main__":
     main()
-
-
-
-
-
-

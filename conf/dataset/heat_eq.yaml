@@ -1,6 +1,7 @@
 data:
-  name: 'heat_equation'
-  datapath: 'data/heat_eq_data_1000_64_64_64_0_20.npz'
+  pde: "heat"
+  name: 'heat_equation_logt'
+  datapath: 'data/heat_logt.hdf5'  # path to save the generated dataset
 
 training:
   batch_size: 64
@@ -10,3 +11,7 @@ training:
   num_epochs: 500
   learning_rate: 1e-3
   weight_decay: 0.0
+
+sampling:
+  sample_shape: (2, 64, 64) # shape of single sample (C, H, W)
+  batch_size: 32            # batch size for sampling

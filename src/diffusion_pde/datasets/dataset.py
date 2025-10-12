@@ -1,5 +1,6 @@
 import torch
 import numpy as np
+import h5py
 from typing import Optional
 
 class DiffusionDataset(torch.utils.data.Dataset):
@@ -68,6 +69,38 @@ class DiffusionDataset(torch.utils.data.Dataset):
             label = torch.cat((torch.tensor([label]), self.labels[idx]), dim=0)
         return X, label
     
+def get_dataloader(
+    datapath: str,
+    batch_size: int,
+    shuffle: bool = True,      
+):
+    """
+    Utility function to load dataset from .h5 file and create a dataloader.
+
+    Parameters
+    ----------
+    datapath : str
+        Path to the .h5 file containing the dataset.
+    batch_size : int
+        Batch size for the dataloader.
+    shuffle : bool, optional
+        Whether to shuffle the dataset, by default True.
+
+    Returns
+    -------
+    torch.utils.data.DataLoader
+        DataLoader for the dataset.
+    """
+    with h5py.File(datapath, "r") as f:
+        init_state = f["train/A"][:]  # (N, ch_a, h, w)
+        data = f["train/U"][:]        # (N, ch_u, h, w, T)
+        t_steps = f["t_steps"][:]     # (T,)
+        labels = f["train/labels"][:] if "train/labels" in f else None  # (N,) or (N, label_dim)
+
+    dataset = DiffusionDataset(init_state, data, t_steps, labels=labels)
+    dataloader = torch.utils.data.DataLoader(dataset, batch_size=batch_size, shuffle=shuffle)
+    return dataloader
+
 
 def get_dataloaders(
     datapath: str,
