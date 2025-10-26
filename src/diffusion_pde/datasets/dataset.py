@@ -102,6 +102,7 @@ def get_dataloader(
     return dataloader
 
 
+# DEPRECATED FUNCTION
 def get_dataloaders(
     datapath: str,
     batch_size: int,

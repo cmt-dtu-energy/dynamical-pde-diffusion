@@ -110,13 +110,7 @@ def edm_sampler(
     sample_shape,   # (B, C, H, W) shape of samples
     loss_fn,        # loss function to compute gradients
     loss_fn_kwargs, # extra args to pass to loss function
-    #dx,             # spatial grid size 
-    #ch_a,           # number of channels for initial condition
     labels,         # (B, label_dim) extra conditioning your Unet expects; use zeros if None
-    #obs_a,          # (B, Ca, H, W) observations of initial condition
-    #obs_u,          # (B, Cu, H, W) observation of solution at time T
-    #mask_a,         # (B, Ca, H, W) binary mask for obs_a
-    #mask_u,         # (B, Cu, H, W) binary mask for obs_u
     zeta_a=1.0,     # weight for obs_a loss
     zeta_u=1.0,     # weight for obs_u loss
     zeta_pde=1.0,   # weight for pde loss
@@ -145,20 +139,20 @@ def edm_sampler(
         Shape of the samples to generate (B, C, H, W).
     loss_fn : callable
         Loss function to compute gradients, should match signature of heat_loss.
-    dx : float
-        Spatial grid size.
-    ch_a : int
-        Number of channels for initial condition.
+    loss_fn_kwargs : dict
+        Extra arguments to pass to the loss function. Should include:
+        - dx : float
+            Spatial grid size.
+        - obs_a : torch.Tensor
+            (B, Ca, H, W) observations of initial condition.
+        - obs_u : torch.Tensor
+            (B, Cu, H, W) observation of solution at time T.
+        - mask_a : torch.Tensor
+            (B, Ca, H, W) binary mask for obs_a.
+        - mask_u : torch.Tensor
+            (B, Cu, H, W) binary mask for obs_u.
     labels : torch.Tensor
         (B, label_dim) extra conditioning your Unet expects; use zeros if None.
-    obs_a : torch.Tensor
-        (B, Ca, H, W) observations of initial condition.
-    obs_u : torch.Tensor
-        (B, Cu, H, W) observation of solution at time T.
-    mask_a : torch.Tensor
-        (B, Ca, H, W) binary mask for obs_a.
-    mask_u : torch.Tensor
-        (B, Cu, H, W) binary mask for obs_u.
     zeta_a : float, optional
         Weight for obs_a loss, by default 1.0.
     zeta_u : float, optional
@@ -239,8 +233,6 @@ def edm_sampler(
         d_cur = (x_hat - x_N) / sigma_hat
         x_next = x_hat + (sigma_next - sigma_hat) * d_cur
 
-        if i == 0:
-            print(f"dxdt shape: {dxdt.shape}")
         # Heun (2nd-order) correction unless final step
         if i < num_steps - 1:
             x_N, dxdt = X_and_dXdt_fd(net, x_next.to(dtype_f), torch.full((B,), sigma_next, device=device, dtype=dtype_f), labels)

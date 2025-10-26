@@ -5,9 +5,7 @@ data:
 
 training:
   batch_size: 64
-  test_split: 0.2
   shuffle: True
-  generator_seed: 42
   num_epochs: 500
   learning_rate: 1e-3
   weight_decay: 0.0

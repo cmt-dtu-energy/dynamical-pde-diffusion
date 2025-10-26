@@ -14,9 +14,7 @@ def main(cfg):
     dataset_name = cfg.dataset.data.name
     datapath = cfg.dataset.data.datapath
     batch_size = cfg.dataset.training.batch_size
-    test_split = cfg.dataset.training.test_split
     shuffle = cfg.dataset.training.shuffle
-    generator_seed = cfg.dataset.training.generator_seed
 
     # load training configuration
     num_epochs = cfg.dataset.training.num_epochs
