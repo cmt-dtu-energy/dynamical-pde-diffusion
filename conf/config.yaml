@@ -5,7 +5,7 @@ defaults:
 wandb:
   entity: 'philiphohwy-danmarks-tekniske-universitet-dtu'
   project: 'dynamical-pde-diffusion'
-  dir: ${oc.env:REPO_ROOT,${hydra:runtime.cwd}}/logs
+  #dir: ${oc.env:REPO_ROOT,${hydra:runtime.cwd}}/logs
   name: None
 
 hydra:
@@ -14,5 +14,11 @@ hydra:
   sweep:
     dir: ${oc.env:REPO_ROOT,${hydra:runtime.cwd}}/logs/hydra_multirun
     subdir: ${hydra.job.num}
+  job:
+    chdir: false
+    env_set:
+      WANDB_DIR: ${hydra.run.dir}
+  
+  output_subdir: .hydra
 
 model_save_path: ${oc.env:REPO_ROOT,${hydra:runtime.cwd}}/pretrained_models

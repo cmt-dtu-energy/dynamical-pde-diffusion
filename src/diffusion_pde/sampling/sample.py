@@ -124,6 +124,7 @@ def edm_sampler(
     S_noise=1.0,
     generator=None,
     debug=False,
+    compile_net=False
 ):
     """
     Heun (2nd-order) EDM sampler, compatible with net(x, sigma, t).
@@ -190,9 +191,13 @@ def edm_sampler(
     B = sample_shape[0]
     
     net.to(device=device)
+
+    if compile_net:
+        net = torch.compile(net)
+        
     labels = labels.to(device=device, dtype=dtype_f)    # move labels to correct device and dtype
 
-    if generator is not None:
+    if generator is None:
         generator = torch.Generator(device=device)
 
     # Initial sample at sigma_max
@@ -212,7 +217,7 @@ def edm_sampler(
     # Initialize x at sigma_0
     x_next = (latents.to(dtype_t) * sigmas[0])
 
-    losses = np.zeros((num_steps, 4))  # for debugging
+    losses = torch.zeros((num_steps, 4), device=device)  # for debugging
     
     for i, (sigma_cur, sigma_next) in enumerate(zip(sigmas[:-1], sigmas[1:])):  # i = 0..N-1
         x_cur = x_next.detach().clone()
@@ -252,7 +257,7 @@ def edm_sampler(
         grad_x = torch.autograd.grad(loss_comb, x_cur, retain_graph=False)[0]
         x_next = x_next - grad_x
 
-        losses[i] = np.array([loss_obs_a.item(), loss_obs_u.item(), loss_pde.item(), loss_comb.item()])
+        losses[i] = torch.stack([loss_obs_a, loss_obs_u, loss_pde, loss_comb])
 
     # Return at sigma=0 in fp32
-    return x_next.to(dtype_f).detach().cpu().numpy(), losses if debug else None
+    return x_next.to(dtype_f).detach().cpu().numpy(), losses.detach().cpu().numpy() if debug else None

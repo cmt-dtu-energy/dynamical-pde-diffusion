@@ -1,7 +1,11 @@
 data:
   pde: "heat"
-  name: 'heat_equation_logt'
+  name: 'logt'
   datapath: 'data/heat_logt.hdf5'  # path to save the generated dataset
+
+net:
+  in_ch: 2
+  label_ch: 2
 
 training:
   batch_size: 64
@@ -11,5 +15,5 @@ training:
   weight_decay: 0.0
 
 sampling:
-  sample_shape: (2, 64, 64) # shape of single sample (C, H, W)
+  sample_shape: [2, 64, 64] # shape of single sample (C, H, W)
   batch_size: 32            # batch size for sampling
