@@ -1,7 +1,7 @@
 import torch
 from .sample import laplacian
 
-def heat_loss(x, dxdt, obs_a, obs_u, mask_a, mask_u, dx, ch_a, alpha):
+def heat_loss(x, dxdt, obs_a, obs_u, mask_a, mask_u, dx, dy, ch_a, label):
     """
     Compute the heat equation loss components.
     
@@ -20,10 +20,12 @@ def heat_loss(x, dxdt, obs_a, obs_u, mask_a, mask_u, dx, ch_a, alpha):
     mask_u : torch.Tensor
         Binary mask for obs_u, tensor of shape (B, ch_u, H, W).
     dx : float
-        Spatial grid size.
+        Spatial grid size in x-direction.
+    dy : float
+        Spatial grid size in y-direction.
     ch_a : int
         Number of channels for the initial condition.
-    alpha : float
+    label : torch.Tensor
         Diffusion coefficient.
 
     Returns
@@ -35,7 +37,7 @@ def heat_loss(x, dxdt, obs_a, obs_u, mask_a, mask_u, dx, ch_a, alpha):
     loss_obs_u : torch.Tensor
         Observation loss component for the solution at time T.
     """
-    
+    alpha = float(label.squeeze())
     dudt = dxdt[:, ch_a:, :, :]
 
     a_N, u_N = x[:, :ch_a, :, :], x[:, ch_a:, :, :]

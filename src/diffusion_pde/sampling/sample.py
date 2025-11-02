@@ -122,6 +122,7 @@ def edm_sampler(
     S_min=0.0,
     S_max=float('inf'),
     S_noise=1.0,
+    to_cpu=True,
     generator=None,
     debug=False,
     compile_net=False
@@ -183,7 +184,8 @@ def edm_sampler(
     -------
     torch.Tensor
         Denoised sample at sigma=0 with shape (B, C, H, W).
-
+    np.ndarray (optional)
+        Losses throughout sampling if debug=True, else None.
         """
     dtype_f = torch.float32     # net runs in fp32
     dtype_t = torch.float64     # keep time grid in fp64 for stability, as in EDM
@@ -260,4 +262,10 @@ def edm_sampler(
         losses[i] = torch.stack([loss_obs_a, loss_obs_u, loss_pde, loss_comb])
 
     # Return at sigma=0 in fp32
-    return x_next.to(dtype_f).detach().cpu().numpy(), losses.detach().cpu().numpy() if debug else None
+    x = x_next.to(dtype_f).detach()
+    if to_cpu:
+        x = x.cpu()
+
+    losses = losses.detach().cpu().numpy() if debug else None
+
+    return x, losses
