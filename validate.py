@@ -6,9 +6,10 @@ import diffusion_pde as dpde
 import torch
 import numpy as np
 from torch.utils.data import DataLoader, Subset
+import logging
+#logging.basicConfig(level=logging.DEBUG)
 
-
-@hydra.main(version_base=None, config_path="./conf", config_name="config")
+@hydra.main(version_base=None, config_path="./conf", config_name="validate")
 def main(cfg):
     # load dataset configuration
     pde_name = cfg.dataset.data.pde.lower()
@@ -18,7 +19,7 @@ def main(cfg):
     model_name = cfg.model.name.lower()
 
     # load wandb configuration
-    wandb_kwargs = OmegaConf.to_container(cfg.wandb)
+    wandb_kwargs = OmegaConf.to_container(cfg.wandb, resolve=True)
     if wandb_kwargs["name"] == "None":
         wandb_kwargs["name"] = None
 
@@ -40,18 +41,20 @@ def main(cfg):
         "config": config,
     })
 
+    edm = dpde.utils.get_net_from_config(cfg)
 
-    # Validation data generated here
-    Us, As, tsteps, labels = dpde.validation.data_gen_wrapper(cfg.dataset.validation)
-    N = Us.shape[0]
+    model_save_path = Path(cfg.pretrained_path)
 
-    device = torch.device(cfg.dataset.validation.device)
-    edm = dpde.utils.get_net_from_config(cfg).to(device)
+    edm.load_state_dict(torch.load(model_save_path, weights_only=True))
 
-    with wandb.init(**wandb_kwargs) as run:
-        pass
+    dpde.validation.validate_model(
+        model=edm,
+        validation_cfg=cfg.dataset.validation,
+        sampling_cfg=cfg.dataset.sampling,
+        observation_cfg=cfg.observations,
+        wandb_kwargs=wandb_kwargs,
+    )
 
-    
 
 if __name__ == "__main__":
     main()

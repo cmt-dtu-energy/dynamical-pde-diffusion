@@ -1,6 +1,9 @@
 import torch
+import logging
 import numpy as np
 from torch.func import jvp, vmap
+
+logger = logging.getLogger(__name__)
 
 def X_and_dXdt_fd(net, x, sigma, labels, eps=1e-5):
     """
@@ -97,7 +100,7 @@ def laplacian(u, dx):
     laplacian_kernel = torch.tensor(
         [[0, 1, 0],
          [1, -4, 1],
-         [0, 1, 0]], dtype=torch.float64, device=u.device
+         [0, 1, 0]], dtype=u.dtype, device=u.device
     ).unsqueeze(0).unsqueeze(0)  # shape (1, 1, 3, 3)
     u_padded = torch.nn.functional.pad(u, (1, 1, 1, 1), mode='reflect')  # shape (B, C, H+2, W+2)
     laplacian_u = torch.nn.functional.conv2d(u_padded, laplacian_kernel) / (dx ** 2)  # shape (B, C, H, W)
@@ -125,7 +128,8 @@ def edm_sampler(
     to_cpu=True,
     generator=None,
     debug=False,
-    compile_net=False
+    return_losses=False,
+    compile_net=False,
 ):
     """
     Heun (2nd-order) EDM sampler, compatible with net(x, sigma, t).
@@ -235,14 +239,14 @@ def edm_sampler(
         x_hat = x_cur + (noise_scale * S_noise) * torch.randn_like(x_cur)
 
         # Euler step to t_next
-        x_N, dxdt = X_and_dXdt_fd(net, x_hat.to(dtype_f), torch.full((B,), sigma_hat, device=device, dtype=dtype_f), labels)
+        x_N, dxdt = X_and_dXdt(net, x_hat.to(dtype_f), torch.full((B,), sigma_hat, device=device, dtype=dtype_f), labels)
         x_N, dxdt = x_N.to(dtype_t), dxdt.to(dtype_t)
         d_cur = (x_hat - x_N) / sigma_hat
         x_next = x_hat + (sigma_next - sigma_hat) * d_cur
 
         # Heun (2nd-order) correction unless final step
         if i < num_steps - 1:
-            x_N, dxdt = X_and_dXdt_fd(net, x_next.to(dtype_f), torch.full((B,), sigma_next, device=device, dtype=dtype_f), labels)
+            x_N, dxdt = X_and_dXdt(net, x_next.to(dtype_f), torch.full((B,), sigma_next, device=device, dtype=dtype_f), labels)
             x_N, dxdt = x_N.to(dtype_t), dxdt.to(dtype_t)
             d_prime = (x_next - x_N) / sigma_next
             x_next = x_hat + (sigma_next - sigma_hat) * (0.5 * d_cur + 0.5 * d_prime)
@@ -260,12 +264,19 @@ def edm_sampler(
         x_next = x_next - grad_x
 
         losses[i] = torch.stack([loss_obs_a, loss_obs_u, loss_pde, loss_comb])
+        #if debug:
+        #    logger.info(f"x_next min: {x_next.min().item():.6f}, max: {x_next.max().item():.6f}")
+        #    logger.debug(f"Step {i+1}/{num_steps}, Losses - obs_a: {loss_obs_a.item():.6f}, obs_u: {loss_obs_u.item():.6f}, pde: {loss_pde.item():.6f}, combined: {loss_comb.item():.6f}")
+        #    logger.debug(f"dtypes during sampling - x_next: {x_next.dtype}, net output: {x_N.dtype}, labels: {labels.dtype}")
+        #    logger.debug(f"dtypes loss: obs_a: {loss_obs_a.dtype}, obs_u: {loss_obs_u.dtype}, pde: {loss_pde.dtype}, combined: {loss_comb.dtype}")
 
+    if debug:
+        logger.info(f"Sampling completed with final losses - {loss_comb.item():.6f}")
     # Return at sigma=0 in fp32
     x = x_next.to(dtype_f).detach()
     if to_cpu:
         x = x.cpu()
 
-    losses = losses.detach().cpu().numpy() if debug else None
+    losses = losses.detach().cpu().numpy() if return_losses else None
 
     return x, losses

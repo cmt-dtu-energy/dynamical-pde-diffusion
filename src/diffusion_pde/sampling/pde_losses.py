@@ -1,7 +1,10 @@
 import torch
+import logging
 from .sample import laplacian
 
-def heat_loss(x, dxdt, obs_a, obs_u, mask_a, mask_u, dx, dy, ch_a, label):
+logger = logging.getLogger(__name__)
+
+def heat_loss(x, dxdt, obs_a, obs_u, mask_a, mask_u, dx, dy, ch_a, labels):
     """
     Compute the heat equation loss components.
     
@@ -25,7 +28,7 @@ def heat_loss(x, dxdt, obs_a, obs_u, mask_a, mask_u, dx, dy, ch_a, label):
         Spatial grid size in y-direction.
     ch_a : int
         Number of channels for the initial condition.
-    label : torch.Tensor
+    labels : torch.Tensor
         Diffusion coefficient.
 
     Returns
@@ -37,7 +40,7 @@ def heat_loss(x, dxdt, obs_a, obs_u, mask_a, mask_u, dx, dy, ch_a, label):
     loss_obs_u : torch.Tensor
         Observation loss component for the solution at time T.
     """
-    alpha = float(label.squeeze())
+    alpha = labels.view(x.shape[0], 1, 1, 1)  # Reshape to (B, 1, 1, 1) for broadcasting
     dudt = dxdt[:, ch_a:, :, :]
 
     a_N, u_N = x[:, :ch_a, :, :], x[:, ch_a:, :, :]

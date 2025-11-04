@@ -20,29 +20,21 @@ sampling:
   ch_a: 1
   zeta_a: 50.0
   zeta_u: 5.0
-  zeta_pde: 1.0
+  zeta_pde: 0.5
   num_steps: 50
   loss_func: "diffusion_pde.sampling.heat_loss"
 
 validation:
   data_gen_func: "diffusion_pde.pdes.generate_heat"
   func_kwargs:
-    N: 200
-    B: 32
+    N: 50
+    B: 25
     steps: 50
     T: 0.5
     device: "cuda"
-    seed: 42
+    seed: 12
     Lx: 1.0
     Ly: 1.0
     Nx: 64
     Ny: 64
-    time_spacing: "logt"
-  
-  observations:
-    same_interior: false  #whether to use the same interior observation mask for A and U
-    same_boundary: true   #whether to use the same boundary observation mask for A and U
-    interior_a: 1.0   #fraction of interior points of A (and optionally U) observed
-    interior_u: 0.0   #fraction of interior points of U observed
-    boundary_a: 0.5     #fraction of boundary points of A (and optionally U) observed
-    boundary_u: 0.5     #fraction of boundary points of U observed
+    time_spacing: "lineart"

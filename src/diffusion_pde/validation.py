@@ -1,10 +1,15 @@
 import math
 import torch
+import numpy as np
 import wandb
-from diffusion_pde.utils import get_function_from_path
+import matplotlib.pyplot as plt
+import logging
+from diffusion_pde.utils import get_function_from_path, get_repo_root
 from diffusion_pde.sampling import edm_sampler
 from omegaconf import DictConfig, OmegaConf
+from pathlib import Path
 
+logger = logging.getLogger(__name__)
 
 def data_gen_wrapper(validation_cfg: DictConfig):
     """
@@ -21,24 +26,26 @@ def data_gen_wrapper(validation_cfg: DictConfig):
     data_gen_func = get_function_from_path(validation_cfg.data_gen_func)
     func_args = validation_cfg.func_kwargs
 
-    N = func_args.N,
-    B = func_args.B,
-    Lx = func_args.Lx,
-    Ly = func_args.Ly,
-    Nx = func_args.Nx,
-    Ny = func_args.Ny,
-    steps = func_args.steps,
-    T = func_args.T,
-    device = func_args.device,
+    N = func_args.N
+    B = func_args.B
+    Lx = func_args.Lx
+    Ly = func_args.Ly
+    Nx = func_args.Nx
+    Ny = func_args.Ny
+    steps = func_args.steps
+    T = func_args.T
+    device = func_args.device
     ic_seed = func_args.seed
 
     if "generate_heat" in validation_cfg.data_gen_func:
-        time_spacing = func_args.get("time_spacing", "linear")
+        time_spacing = func_args.get("time_spacing", "lineart")
 
-        if time_spacing == "linear":
+        if time_spacing == "lineart":
             time_steps = torch.linspace(0, T, steps + 1)
-        elif time_spacing == "log":
+        elif time_spacing == "logt":
             time_steps = torch.logspace(-4, math.log10(T), steps + 1)
+        else:
+            raise ValueError(f"Unknown time spacing: {time_spacing}")
         dt = time_steps[1:] - time_steps[:-1]
         Us, As, tsteps, labels = data_gen_func(N=N, B=B, S=Nx, steps=steps, dt=dt, Lx=Lx, Ly=Ly, device=device, ic_seed=ic_seed)
 
@@ -47,7 +54,10 @@ def data_gen_wrapper(validation_cfg: DictConfig):
     
     else:
         raise ValueError(f"Unknown data generation function: {validation_cfg.data_gen_func}")
-
+    Us = torch.tensor(Us)
+    As = torch.tensor(As)
+    tsteps = torch.tensor(tsteps)
+    labels = torch.tensor(labels)
     return Us, As, tsteps, labels
 
 
@@ -166,14 +176,30 @@ def combine_masks(*masks):
     return combined_mask
 
 
+def load_mask_from_dir(pth):
+    pth = Path(pth)
+    if pth.suffix == ".mat":
+        from scipy.io import loadmat
+        masks = loadmat(pth)
+    elif pth.suffix in [".npz"]:
+        masks = np.load(pth)
+    else:
+        raise ValueError(f"unsupported file format: {pth.suffix}")
+    return masks
+
 def validate_model(
     model: torch.nn.Module,
     validation_cfg: DictConfig,
     sampling_cfg: DictConfig,
+    observation_cfg: DictConfig,
     wandb_kwargs: dict,
 ):
     """
     Validate a trained diffusion PDE model using generated data.
+
+    Parameters:
+    -----------
+    
     """
 
     sample_shape = sampling_cfg.sample_shape
@@ -186,47 +212,80 @@ def validate_model(
 
     s_shape = (batch_size, *sample_shape)
 
-    # Validation data generated here
-    Us, As, tsteps, labels = data_gen_wrapper(validation_cfg)
-    N = Us.shape[0]
 
-    device = torch.device(validation_cfg.device)
+    # CHANGE TO LOADING DATA FROM DATABASE INSTEAD OF GENERATING ON THE FLY
+    # Validation data generated here
+    logger.info("Generating validation data...")
+    Us, As, tsteps, labels = data_gen_wrapper(validation_cfg)   # tensors with dtype float64
+    if torch.any(torch.isinf(Us)):
+        logger.error("Generated data contains infinite values! Exiting validation.")
+        return
+    elif torch.any(torch.isnan(Us)):
+        logger.error("Generated data contains NaN values! Exiting validation.")
+        return
+    elif torch.any(Us > 1e3):
+        logger.warning("Generated data contains very large values (>1e3). Check data generation process.")
+
+    N = Us.shape[0]
+    logger.info("Successfully generated test data!")
+
+    device = torch.device(validation_cfg.func_kwargs.device)
     model.to(device)
 
-    # set up observation masks
-    interior_a = random_interior_mask(sample_shape[1], sample_shape[2], frac_obs=validation_cfg.observations.interior_a)
-    boundary_a = random_boundary_mask(sample_shape[1], sample_shape[2], frac_obs=validation_cfg.observations.boundary_a)
+    mask_a = None
+    mask_u = None
+    if observation_cfg.masks_pth is not None:
+        logger.info("Trying to load given masks...")
+        try:
+            masks = load_mask_from_dir(Path(observation_cfg.masks_pth))
+            mask_a = torch.tensor(masks["mask_a"])
+            mask_u = torch.tensor(masks["mask_u"])
+            logger.info("Successfully loaded masks")
+        except Exception as e:
+            logger.warning("Could not resolve mask path, defaulting to random masks.")
+            pass
 
-    if validation_cfg.observations.same_interior:
-        interior_u = interior_a
-    else:
-        interior_u = random_interior_mask(sample_shape[1], sample_shape[2], frac_obs=validation_cfg.observations.interior_u)
+    if mask_a is None and mask_u is None:
+        logger.info("Generating random masks for observations")
+        # set up observation masks
+        interior_a = random_interior_mask(sample_shape[1], sample_shape[2], frac_obs=observation_cfg.interior_a)
+        boundary_a = random_boundary_mask(sample_shape[1], sample_shape[2], frac_obs=observation_cfg.boundary_a)
 
-    if validation_cfg.observations.same_boundary:
-        boundary_u = boundary_a
-    else:
-        boundary_u = random_boundary_mask(sample_shape[1], sample_shape[2], frac_obs=validation_cfg.observations.boundary_u)
+        if observation_cfg.same_interior:
+            interior_u = interior_a
+        else:
+            interior_u = random_interior_mask(sample_shape[1], sample_shape[2], frac_obs=observation_cfg.interior_u)
 
-    mask_a = combine_masks(interior_a, boundary_a)
-    mask_u = combine_masks(interior_u, boundary_u)
+        if observation_cfg.same_boundary:
+            boundary_u = boundary_a
+        else:
+            boundary_u = random_boundary_mask(sample_shape[1], sample_shape[2], frac_obs=observation_cfg.boundary_u)
 
+        mask_a = combine_masks(interior_a, boundary_a)
+        mask_u = combine_masks(interior_u, boundary_u)
+
+    mask_a = mask_a
+    mask_u = mask_u
 
     with wandb.init(**wandb_kwargs) as run:
+        logger.info("Began WandB run.")
         run.config.update({
             "validation_config": OmegaConf.to_container(validation_cfg, resolve=True),
             "sampling_config": OmegaConf.to_container(sampling_cfg, resolve=True),
+            "observation_config": OmegaConf.to_container(observation_cfg, resolve=True)
         })
 
         model.eval()
-        errors = torch.zeros(N, tsteps.shape[0], batch_size, sample_shape[0], device=device)
-
+        mse = torch.zeros(N, tsteps.shape[0], batch_size, sample_shape[0], device=device)    # shape: (N, time_steps, batch_size, channels)
+        logger.info(f"mse tensor device: {mse.device}, dtype: {mse.dtype}")
         for i in range(N):
             lbl = labels[i]
-            lbls = lbl.repeat(batch_size, 1)
+            #lbl = lbl.repeat(batch_size, 1)
+            lbl = lbl.expand(batch_size, -1)
             for j in range(tsteps.shape[0]):
                 obs_a = As[i]
                 obs_u = Us[i, ..., j]
-                obs = torch.cat([obs_a, obs_u], dim=0).to(device)
+                obs = torch.cat([obs_a, obs_u], dim=0).to(torch.float32).to(device)
                 loss_fn_kwargs = {
                     "obs_a": obs_a,
                     "obs_u": obs_u,
@@ -235,12 +294,12 @@ def validate_model(
                     "dx": dx,
                     "dy": dy,
                     "ch_a": ch_a,
-                    "label": lbl,
+                    "labels": lbl,
                 }
-                t_labels = torch.full((sample_shape[0], 1), tsteps[j])
-                lbls = torch.cat([t_labels, lbls], dim=1).to(device)
+                t_labels = torch.full((s_shape[0], 1), float(tsteps[j]))
+                lbls = torch.cat([t_labels, lbl], dim=1).to(device)
 
-                samples, _ = edm_sampler(
+                samples, losses = edm_sampler(
                     net=model,
                     device=device,
                     sample_shape=s_shape,
@@ -252,8 +311,69 @@ def validate_model(
                     zeta_pde=sampling_cfg.zeta_pde,
                     num_steps=sampling_cfg.num_steps,
                     to_cpu=False,
+                    return_losses=True,
+                    debug=False,
                 )
+                #logger.info(f"samples dtype: {samples.dtype}, device: {samples.device}, min={samples.min().item()}, max={samples.max().item()}")
+                if not torch.isfinite(samples).all():
+                    logger.error("samples contain non-finite values! Exiting validation.")
+                    return
+                
+                
+                mse[i, j] = torch.mean((samples - obs.unsqueeze(0)) ** 2, dim=(2, 3)).detach()   # mean squared error per channel - shape: (batch_size, channels)
+                if mse[i, j].isnan().any():
+                    logger.error("mse contains NaN values! Exiting validation.")
+                    return
+                elif mse[i, j].mean().item() > 1.0:
+                    logger.warning(f"High MSE detected: {mse[i, j].mean().item()} at sample {i}, time step {j}")
+                    fig, axs = plt.subplots(1, 2, figsize=(12, 5), dpi=100)
+                    axs[0].plot(losses[:, :3])
+                    axs[0].set(xlabel='sampling step', ylabel='loss', title="Losses During Sampling")
+                    axs[0].grid()
+                    axs[1].plot(losses[:, 3])
+                    axs[1].set(xlabel='sampling step', ylabel='combined loss', title="Combined Loss During Sampling")
+                    axs[1].grid()
+                    for p_idx in range(2):
+                        temp_min, temp_max = axs[p_idx].get_ylim()
+                        axs[p_idx].vlines(0.8 * sampling_cfg.num_steps, ymin=temp_min, ymax=temp_max, color='red', linestyle='--')
+                    axs[0].legend(['obs_a', 'obs_u', 'pde', 'obs weight drop ($\\times 0.1$)'])
+                    plt.savefig(f"high_mse_sample_{i}_tstep_{j}.png")
+                    plt.close(fig)
+                
 
-                errors[i, j, :] = torch.mean((samples - obs.unsqueeze(0)) ** 2, dim=(2, 3)).detach()
+            logger.info(f"Completed validation of sample {i+1}/{N}\t\tMSE: {mse[i].mean().item()}")
+        logger.info("Completed validation.")
+        for t in range(tsteps.shape[0]):
+            run.log({"Error/validation/time-step/mse": mse[:, t].mean().item()}, step=t)     
 
-        
+        mse_batches = mse.mean(dim=2)         # mse over batches - shape (N, time_steps, channels)
+        rmse_batches = mse_batches.clamp_min(0).sqrt()  # mean across batches - shape: (N, time_steps, channels)
+        mu = rmse_batches.mean(axis=0).cpu().numpy()  # mean across samples - shape: (time_steps, channels)
+        std = rmse_batches.std(dim=0).cpu().numpy()  # std across samples - shape: (time_steps, channels)
+
+        if not torch.isfinite(mse_batches).all():
+            logger.error("mse is not finite!")
+
+        art_name = f"{run.config['pde']}-{run.config['dataset']}-{run.config['model']}-validation-errors".lower().replace(" ", "-").replace("_", "-")
+        save_path = f"{art_name.replace('-', '_')}.npy"         
+        np.save(save_path, mse.cpu().numpy())
+        logger.info("Successfully stored errors.")
+
+        artifact = wandb.Artifact(name=art_name, type="error", metadata=dict(run_id=run.id, **run.config))
+        artifact.add_file(str(save_path))
+        run.log_artifact(artifact)
+        logger.info("Successfully logged errors to WandB.")
+
+        t = tsteps.detach().cpu().numpy()
+        for i in range(mu.shape[1]):
+            fig, ax = plt.subplots(figsize=(9, 6), dpi=200)
+            ax.plot(t, mu[:, i], label="error", color="C0")
+            ax.fill_between(t, mu[:, i] - std[:, i], mu[:, i] + std[:, i], color="C0", alpha=0.2, label="Std Dev")
+            ax.scatter(t, mu[:, i], c="red", s=2, label="datapoints", zorder=10)
+            ax.set(title="Validation RMSE over Time", xlabel="Time", ylabel="RMSE")
+            ax.legend()
+            plt.savefig(f"error_channel_{i}.png")
+            run.log({f"Figures/Validate/Channel_{i}": wandb.Image(fig)})
+        plt.close(fig)
+        logger.info("Successfully generated figures.")
+

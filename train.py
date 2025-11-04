@@ -7,7 +7,7 @@ import numpy as np
 from torch.utils.data import DataLoader, Subset
 
 
-@hydra.main(version_base=None, config_path="./conf", config_name="config")
+@hydra.main(version_base=None, config_path="./conf", config_name="train")
 def main(cfg):
 
     # load dataset configuration

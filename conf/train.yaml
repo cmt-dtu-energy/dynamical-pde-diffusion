@@ -5,7 +5,7 @@ defaults:
 wandb:
   entity: 'philiphohwy-danmarks-tekniske-universitet-dtu'
   project: 'dynamical-pde-diffusion'
-  #dir: ${oc.env:REPO_ROOT,${hydra:runtime.cwd}}/logs
+  dir: ${oc.env:REPO_ROOT,${oc.env:PWD}}/logs
   name: None
 
 hydra:
@@ -15,9 +15,7 @@ hydra:
     dir: ${oc.env:REPO_ROOT,${hydra:runtime.cwd}}/logs/hydra_multirun
     subdir: ${hydra.job.num}
   job:
-    chdir: false
-    env_set:
-      WANDB_DIR: ${hydra.run.dir}
+    chdir: true #if broken, set to false
   
   output_subdir: .hydra
 

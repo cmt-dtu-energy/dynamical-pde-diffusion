@@ -49,7 +49,7 @@ def train(
             
             epoch_loss = running_loss / len(dataloader)
 
-            run.log({"Loss/train/epoch": epoch_loss})
+            run.log({"Loss/train/epoch": epoch_loss}, step=epoch)
 
 
         torch.save(model.state_dict(), save_path)

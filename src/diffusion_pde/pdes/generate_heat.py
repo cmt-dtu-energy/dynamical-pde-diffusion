@@ -191,7 +191,8 @@ def generate_heat(
         dtype: torch.dtype = torch.float32,  # torch dtype
         ic_seed: int | None = None,         # random seed for IC generation (None = random each call
 ):
-    
+    if B > N:
+        B = N
     X, Y = make_grid(S, Lx, Ly, device=device, dtype=dtype)     # (S,S)
     S_dst, lam2d = dirichlet_sine_basis(S, Lx, Ly, device=device, dtype=dtype)  # (S,S), (S,S)
 
@@ -225,7 +226,7 @@ def generate_heat(
         labels[start:end] = alpha.cpu()
         start = end
 
-        t_steps = np.concatenate((np.zeros(1), dt.cpu().numpy().cumsum()))  # (steps+1,)
+    t_steps = np.concatenate((np.zeros(1), dt.cpu().numpy().cumsum()))  # (steps+1,)
     labels = labels.view(-1, 1)  # (N,1)
     return U.numpy(), A.numpy(), t_steps, labels.numpy()
 

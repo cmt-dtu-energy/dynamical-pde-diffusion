@@ -14,7 +14,38 @@ def save_dataset(
     dx: float,
     **attrs,
 ) -> None:
-    
+    """
+    Save dataset to an HDF5 file.
+
+    Parameters
+    ----------
+    filepath : str
+        Path to the output HDF5 file.
+    A_train : np.ndarray
+        Initial conditions for training set, shape (N_train, ch_a, H, W).
+    U_train : np.ndarray
+        Solution data for training set, shape (N_train, ch_u, H, W, T).
+    labels_train : np.ndarray
+        Labels for training set, shape (N_train, label_dim).
+    A_test : np.ndarray
+        Initial conditions for test set, shape (N_test, ch_a, H, W).
+    U_test : np.ndarray
+        Solution data for test set, shape (N_test, ch_u, H, W, T).
+    labels_test : np.ndarray
+        Labels for test set, shape (N_test, label_dim).
+    t_steps : np.ndarray
+        Time steps array, shape (T,).
+    T : float
+        Total time duration.
+    dx : float
+        Spatial grid size.
+    attrs : dict
+        Additional attributes to store in the HDF5 file.
+
+    Returns
+    -------
+    None
+    """
     attrs["num_train"] = A_train.shape[0]
     attrs["num_test"] = A_test.shape[0]
     with h5py.File(filepath, "w") as f:
