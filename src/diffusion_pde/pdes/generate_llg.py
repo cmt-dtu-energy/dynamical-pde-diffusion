@@ -8,8 +8,8 @@ import numpy as np
 from tqdm import tqdm
 
 import matplotlib.pyplot as plt
-import numpy as np
 from magtense.micromag import MicromagProblem
+
 
 def gen_s_state(
     res: tuple,
@@ -31,9 +31,7 @@ def gen_s_state(
     def h_ext_fct(t) -> np.ndarray:
         return np.expand_dims(np.where(t < 1e-9, 1e-9 - t, 0), axis=1) * h_ext
 
-    t_out, M_out, _, _, _, _, _ = problem_ini.run_simulation(
-        100e-9, 200, h_ext_fct, 2000
-    )
+    t_out, M_out = problem_ini.run_simulation(100e-9, 200, h_ext_fct, 2000)[:2]
     M_sq_ini = np.squeeze(M_out, axis=2)
 
     if show:
@@ -56,7 +54,7 @@ def gen_seq(
     m0_state: np.ndarray,
     res: list,
     grid_size: list,
-    h_ext: tuple = (0, 0, 0),
+    h_ext: np.ndarray = np.array((0, 0, 0)),
     t_steps: int = 500,
     t_per_step: float = 4e-12,
     cuda: bool = False,
