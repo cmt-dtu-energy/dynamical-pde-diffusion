@@ -7,7 +7,8 @@ import torch
 import numpy as np
 from torch.utils.data import DataLoader, Subset
 import logging
-#logging.basicConfig(level=logging.DEBUG)
+
+logger = logging.getLogger(__name__)
 
 @hydra.main(version_base=None, config_path="./conf", config_name="validate")
 def main(cfg):
@@ -44,12 +45,13 @@ def main(cfg):
     edm = dpde.utils.get_net_from_config(cfg)
 
     model_save_path = Path(cfg.pretrained_path)
+    logger.info(f"Loading pretrained model from {model_save_path}")
 
     edm.load_state_dict(torch.load(model_save_path, weights_only=True))
 
     dpde.validation.validate_model(
         model=edm,
-        validation_cfg=cfg.dataset.validation,
+        #validation_cfg=cfg.dataset.validation,
         sampling_cfg=cfg.dataset.sampling,
         observation_cfg=cfg.observations,
         wandb_kwargs=wandb_kwargs,

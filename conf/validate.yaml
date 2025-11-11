@@ -22,13 +22,15 @@ hydra:
   output_subdir: .hydra
 
 observations:
-  masks_pth: null
+  dataset_path: ${oc.env:REPO_ROOT,${oc.env:PWD}}/data/heat_logt_validate.hdf5
+  num_validate: 30       #number of validation samples to pick
+  masks_path: null
   same_interior: false  #whether to use the same interior observation mask for A and U
   same_boundary: true   #whether to use the same boundary observation mask for A and U
   interior_a: 1.0   #fraction of interior points of A (and optionally U) observed
   interior_u: 0.0   #fraction of interior points of U observed
-  boundary_a: 0.5     #fraction of boundary points of A (and optionally U) observed
-  boundary_u: 0.5     #fraction of boundary points of U observed
+  boundary_a: 1.0     #fraction of boundary points of A (and optionally U) observed
+  boundary_u: 1.0     #fraction of boundary points of U observed
 
-pretrained_path: ${oc.env:REPO_ROOT,${oc.env:PWD}}/pretrained_models/heat_heat_lineart_unet_small.pth
+pretrained_path: ${oc.env:REPO_ROOT,${oc.env:PWD}}/pretrained_models/heat_heat_logt_unet_small.pth
                 # "/home/s204790/dynamical-pde-diffusion/pretrained_models/heat_heat_logt_unet_small.pth"

@@ -69,6 +69,63 @@ class DiffusionDataset(torch.utils.data.Dataset):
             label = torch.cat((torch.tensor([label]), self.labels[idx]), dim=0)
         return X, label
     
+
+class DiffusionDataset2(torch.utils.data.Dataset):
+    """
+    Diffusion dataset compatible with torch DataLoader.
+    Each item is a tuple (X, label) where X is the concatenation of the
+    initial state and a snapshot of the trajectory at time t. the label
+    is a vector containing the time t and any additional labels.
+    Note that t is sampled randomly for each item from the t_steps provided.
+
+    Parameters
+    ----------
+    data : torch.Tensor
+        Tensor of shape (N, ch_u, h, w, T) representing the trajectories.
+    t_steps : torch.Tensor
+        1D tensor of shape (T,) representing the time steps corresponding to the last dimension of `data`.
+    labels : Optional[torch.Tensor], optional
+        Optional tensor of shape (N, label_dim) representing additional labels, by default None.
+    generator : Optional[torch.Generator], optional
+        Random number generator for reproducibility, by default None.
+    """
+    def __init__(self,
+        data: np.ndarray, 
+        t_steps: np.ndarray, 
+        labels: Optional[np.ndarray] = None,
+        generator: Optional[torch.Generator] = None
+    ) -> None:
+        super().__init__()
+        # assume data is (N, ch_u, h, w, t)
+        assert len(data.shape) == 5, f"Dimensions of 'data' should be (N, ch_u, h, w, t) but got {data.shape}"
+
+        self.data = torch.from_numpy(data).float()
+        self.labels = torch.from_numpy(labels).float() if labels is not None else None
+        if self.labels is not None and self.labels.ndim == 1:
+            self.labels = self.labels.reshape((-1, 1))  # ensure labels is (N, label_dim):
+        self.t_steps = torch.from_numpy(t_steps).float()
+
+        self.N, self.T = data.shape[0], data.shape[-1]
+
+        self.g = generator
+
+    def __len__(self) -> int:
+        return self.N
+
+    def __getitem__(self, idx) -> tuple[torch.Tensor, torch.Tensor]:
+        
+        # sample random timestep
+        t0_idx = torch.randint(0, self.T-1, (1,), generator=self.g).item()
+        tf_idx = torch.randint(t0_idx + 1, self.T, (1,), generator=self.g).item()
+
+        # slice data snapshot at timestep
+        # get corresponding time value
+        X = self.data[idx, ..., [t0_idx, tf_idx]]  # shape (ch_u, h, w, 2)
+        label = self.t_steps[tf_idx]
+        if self.labels is not None:
+            label = torch.cat((torch.tensor([label]), self.labels[idx]), dim=0)
+        return X, label
+    
 def get_dataloader(
     datapath: str,
     batch_size: int,
@@ -92,10 +149,10 @@ def get_dataloader(
         DataLoader for the dataset.
     """
     with h5py.File(datapath, "r") as f:
-        init_state = f["train/A"][:]  # (N, ch_a, h, w)
-        data = f["train/U"][:]        # (N, ch_u, h, w, T)
+        init_state = f["A"][:]  # (N, ch_a, h, w)
+        data = f["U"][:]        # (N, ch_u, h, w, T)
         t_steps = f["t_steps"][:]     # (T,)
-        labels = f["train/labels"][:] if "train/labels" in f else None  # (N,) or (N, label_dim)
+        labels = f["labels"][:] if "labels" in f else None  # (N,) or (N, label_dim)
 
     dataset = DiffusionDataset(init_state, data, t_steps, labels=labels)
     dataloader = torch.utils.data.DataLoader(dataset, batch_size=batch_size, shuffle=shuffle)

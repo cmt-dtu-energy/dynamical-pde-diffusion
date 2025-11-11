@@ -1,15 +1,59 @@
 import math
+import time
 import torch
 import numpy as np
 import wandb
 import matplotlib.pyplot as plt
 import logging
-from diffusion_pde.utils import get_function_from_path, get_repo_root
+from diffusion_pde.utils import get_function_from_path
 from diffusion_pde.sampling import edm_sampler
 from omegaconf import DictConfig, OmegaConf
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
+
+
+def get_data_from_hdf5(pth: Path):
+    """
+    Load dataset from an HDF5 file.
+    
+    Parameters
+    ----------
+    pth : Path
+        Path to the HDF5 file.
+
+    Returns
+    -------
+    U : torch.Tensor
+        Solution data tensor.
+    A : torch.Tensor
+        Initial conditions tensor.
+    t_steps : torch.Tensor
+        Time steps tensor.
+    labels : torch.Tensor
+        Labels tensor.
+    attrs : dict
+        Additional attributes from the HDF5 file.
+        Must contain the following
+        - T : float
+            Total time duration.
+        - dx : float
+            Spatial grid size in x direction.
+        - dy : float
+            Spatial grid size in y direction.
+    """
+    import h5py
+
+    with h5py.File(pth, "r") as f:
+        A = f["A"][:]
+        U = f["U"][:]
+        labels = f["labels"][:]
+        t_steps = f["t_steps"][:]
+
+        attrs = dict(f.attrs)
+
+    return torch.tensor(U), torch.tensor(A), torch.tensor(t_steps), torch.tensor(labels), attrs
+
 
 def data_gen_wrapper(validation_cfg: DictConfig):
     """
@@ -189,7 +233,7 @@ def load_mask_from_dir(pth):
 
 def validate_model(
     model: torch.nn.Module,
-    validation_cfg: DictConfig,
+    #validation_cfg: DictConfig,
     sampling_cfg: DictConfig,
     observation_cfg: DictConfig,
     wandb_kwargs: dict,
@@ -199,7 +243,18 @@ def validate_model(
 
     Parameters:
     -----------
-    
+    validation_cfg : DictConfig DEPRECATED
+        Configuration for data generation and validation parameters.
+    sampling_cfg : DictConfig
+        Configuration for the sampling process.
+    observation_cfg : DictConfig
+        Configuration for observation masks and parameters.
+    wandb_kwargs : dict
+        Configuration for WandB logging.
+
+    Returns:
+    --------
+    None
     """
 
     sample_shape = sampling_cfg.sample_shape
@@ -207,16 +262,22 @@ def validate_model(
     ch_a = sampling_cfg.ch_a
     loss_func = get_function_from_path(sampling_cfg.loss_func)
 
-    dx = validation_cfg.func_kwargs.Lx / (sample_shape[1] - 1)
-    dy = validation_cfg.func_kwargs.Ly / (sample_shape[2] - 1)
+    logger.info("Loading validation data from HDF5...")
+    Us, As, tsteps, labels, attrs = get_data_from_hdf5(Path(observation_cfg.dataset_path))
+    dx = attrs["dx"]
+    dy = attrs["dy"]
+    ###dx = validation_cfg.func_kwargs.Lx / (sample_shape[1] - 1)
+    ###dy = validation_cfg.func_kwargs.Ly / (sample_shape[2] - 1)
 
     s_shape = (batch_size, *sample_shape)
 
 
     # CHANGE TO LOADING DATA FROM DATABASE INSTEAD OF GENERATING ON THE FLY
+    # ---------------------------------------------------------------------
     # Validation data generated here
-    logger.info("Generating validation data...")
-    Us, As, tsteps, labels = data_gen_wrapper(validation_cfg)   # tensors with dtype float64
+    ###logger.info("Generating validation data...")
+    ###Us, As, tsteps, labels = data_gen_wrapper(validation_cfg)   # tensors with dtype float64
+    logger.info(f"Data min: {Us.min().item():<.4f}, max: {Us.max().item():<.4f}, num NaNs: {torch.isnan(Us).sum().item()}")
     if torch.any(torch.isinf(Us)):
         logger.error("Generated data contains infinite values! Exiting validation.")
         return
@@ -225,19 +286,25 @@ def validate_model(
         return
     elif torch.any(Us > 1e3):
         logger.warning("Generated data contains very large values (>1e3). Check data generation process.")
+    # ---------------------------------------------------------------------
+    # ---------------------------- END CHANGES ----------------------------
+    N = observation_cfg.num_validate
+    logger.info(f"Validating on {N} samples out of {Us.shape[0]} available.")
+    Us = Us[:N]
+    As = As[:N]
+    labels = labels[:N]
+    
+    num_tsteps = tsteps.shape[0]
 
-    N = Us.shape[0]
-    logger.info("Successfully generated test data!")
-
-    device = torch.device(validation_cfg.func_kwargs.device)
-    model.to(device)
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    model.to(device).eval()
 
     mask_a = None
     mask_u = None
-    if observation_cfg.masks_pth is not None:
+    if observation_cfg.masks_path is not None:
         logger.info("Trying to load given masks...")
         try:
-            masks = load_mask_from_dir(Path(observation_cfg.masks_pth))
+            masks = load_mask_from_dir(Path(observation_cfg.masks_path))
             mask_a = torch.tensor(masks["mask_a"])
             mask_u = torch.tensor(masks["mask_u"])
             logger.info("Successfully loaded masks")
@@ -246,7 +313,7 @@ def validate_model(
             pass
 
     if mask_a is None and mask_u is None:
-        logger.info("Generating random masks for observations")
+        logger.info(f"Generating random masks for observations with fractions (interior, boundary): {observation_cfg.interior_a}, {observation_cfg.boundary_a} (a) and {observation_cfg.interior_u}, {observation_cfg.boundary_u} (u)")
         # set up observation masks
         interior_a = random_interior_mask(sample_shape[1], sample_shape[2], frac_obs=observation_cfg.interior_a)
         boundary_a = random_boundary_mask(sample_shape[1], sample_shape[2], frac_obs=observation_cfg.boundary_a)
@@ -264,28 +331,26 @@ def validate_model(
         mask_a = combine_masks(interior_a, boundary_a)
         mask_u = combine_masks(interior_u, boundary_u)
 
-    mask_a = mask_a
-    mask_u = mask_u
+
+    t_batch_all = tsteps.view(num_tsteps, 1, 1).expand(num_tsteps, batch_size, 1)
+    mse = torch.zeros(N, num_tsteps, batch_size, sample_shape[0], device=device)    # shape: (N, time_steps, batch_size, channels)
 
     with wandb.init(**wandb_kwargs) as run:
-        logger.info("Began WandB run.")
+        logger.info("Initialized WandB run.")
         run.config.update({
-            "validation_config": OmegaConf.to_container(validation_cfg, resolve=True),
+            #"validation_config": OmegaConf.to_container(validation_cfg, resolve=True),
             "sampling_config": OmegaConf.to_container(sampling_cfg, resolve=True),
             "observation_config": OmegaConf.to_container(observation_cfg, resolve=True)
         })
-
-        model.eval()
-        mse = torch.zeros(N, tsteps.shape[0], batch_size, sample_shape[0], device=device)    # shape: (N, time_steps, batch_size, channels)
-        logger.info(f"mse tensor device: {mse.device}, dtype: {mse.dtype}")
+        t1_outer = time.perf_counter()
         for i in range(N):
             lbl = labels[i]
             #lbl = lbl.repeat(batch_size, 1)
-            lbl = lbl.expand(batch_size, -1)
-            for j in range(tsteps.shape[0]):
+            lbl = lbl.unsqueeze(0).expand(batch_size, -1)
+            t1_inner = time.perf_counter()
+            for j in range(num_tsteps):
                 obs_a = As[i]
                 obs_u = Us[i, ..., j]
-                obs = torch.cat([obs_a, obs_u], dim=0).to(torch.float32).to(device)
                 loss_fn_kwargs = {
                     "obs_a": obs_a,
                     "obs_u": obs_u,
@@ -296,8 +361,9 @@ def validate_model(
                     "ch_a": ch_a,
                     "labels": lbl,
                 }
-                t_labels = torch.full((s_shape[0], 1), float(tsteps[j]))
-                lbls = torch.cat([t_labels, lbl], dim=1).to(device)
+                #t_lbl = tsteps[j].unsqueeze(0).repeat(batch_size, 1)
+                t_lbl = t_batch_all[j]
+                lbls = torch.cat([t_lbl, lbl], dim=1).to(device)
 
                 samples, losses = edm_sampler(
                     net=model,
@@ -311,38 +377,19 @@ def validate_model(
                     zeta_pde=sampling_cfg.zeta_pde,
                     num_steps=sampling_cfg.num_steps,
                     to_cpu=False,
-                    return_losses=True,
+                    return_losses=False,
                     debug=False,
                 )
-                #logger.info(f"samples dtype: {samples.dtype}, device: {samples.device}, min={samples.min().item()}, max={samples.max().item()}")
-                if not torch.isfinite(samples).all():
-                    logger.error("samples contain non-finite values! Exiting validation.")
-                    return
-                
-                
+                obs = torch.cat([obs_a, obs_u], dim=0).to(torch.float32).to(device)
                 mse[i, j] = torch.mean((samples - obs.unsqueeze(0)) ** 2, dim=(2, 3)).detach()   # mean squared error per channel - shape: (batch_size, channels)
-                if mse[i, j].isnan().any():
-                    logger.error("mse contains NaN values! Exiting validation.")
-                    return
-                elif mse[i, j].mean().item() > 1.0:
-                    logger.warning(f"High MSE detected: {mse[i, j].mean().item()} at sample {i}, time step {j}")
-                    fig, axs = plt.subplots(1, 2, figsize=(12, 5), dpi=100)
-                    axs[0].plot(losses[:, :3])
-                    axs[0].set(xlabel='sampling step', ylabel='loss', title="Losses During Sampling")
-                    axs[0].grid()
-                    axs[1].plot(losses[:, 3])
-                    axs[1].set(xlabel='sampling step', ylabel='combined loss', title="Combined Loss During Sampling")
-                    axs[1].grid()
-                    for p_idx in range(2):
-                        temp_min, temp_max = axs[p_idx].get_ylim()
-                        axs[p_idx].vlines(0.8 * sampling_cfg.num_steps, ymin=temp_min, ymax=temp_max, color='red', linestyle='--')
-                    axs[0].legend(['obs_a', 'obs_u', 'pde', 'obs weight drop ($\\times 0.1$)'])
-                    plt.savefig(f"high_mse_sample_{i}_tstep_{j}.png")
-                    plt.close(fig)
-                
+                t2_inner = time.perf_counter()
 
-            logger.info(f"Completed validation of sample {i+1}/{N}\t\tMSE: {mse[i].mean().item()}")
-        logger.info("Completed validation.")
+            #if logger.isEnabledFor(logging.DEBUG):
+            logger.info(f"Completed validation of sample {i+1}/{N} in {t2_inner - t1_inner:.2f}s:\tMSE: {mse[i].mean().item()}")
+            
+        t2_outer = time.perf_counter()
+        logger.info(f"Completed validation in {(t2_outer - t1_outer) / 60.:.2f} minutes.")
+
         for t in range(tsteps.shape[0]):
             run.log({"Error/validation/time-step/mse": mse[:, t].mean().item()}, step=t)     
 

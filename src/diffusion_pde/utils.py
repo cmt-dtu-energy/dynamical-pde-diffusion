@@ -78,7 +78,7 @@ class ResultsObject:
         self._model_path = self.root_path / "pretrained_models" / f"{self.save_name}.pth"
         self._data_path = self.root_path / self.cfg.dataset.data.datapath
 
-        self._wandb_artifact_str = f"philiphohwy-danmarks-tekniske-universitet-dtu/dynamical-pde-diffusion/{self.save_name.replace('_', '-')}:latest"
+        self._wandb_artifact_str = f"philiphohwy-danmarks-tekniske-universitet-dtu/dynamical-pde-diffusion/{self.save_name.replace('_', '-')}"
 
     @property
     def model_path(self):
@@ -94,9 +94,9 @@ class ResultsObject:
         else:
             raise FileNotFoundError(f"Data path does not exist: {self._data_path}.")
 
-    def get_wandb_model(self, root="pretrained_models/wandb"):
+    def get_wandb_model(self, root="pretrained_models/wandb", version="latest"):
         api = wandb.Api()
-        artifact = api.artifact(self._wandb_artifact_str)
+        artifact = api.artifact(f"{self._wandb_artifact_str}:{version}")
         root = Path(root).resolve()
         if str(self.root_path) not in str(root):
             root = self.root_path / root

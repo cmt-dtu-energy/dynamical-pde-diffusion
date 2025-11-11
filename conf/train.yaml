@@ -1,6 +1,7 @@
 defaults:
   - dataset: heat_eq
   - model: unet
+  - _self_
 
 wandb:
   entity: 'philiphohwy-danmarks-tekniske-universitet-dtu'
