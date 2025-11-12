@@ -102,6 +102,7 @@ def laplacian(u, dx):
          [1, -4, 1],
          [0, 1, 0]], dtype=u.dtype, device=u.device
     ).unsqueeze(0).unsqueeze(0)  # shape (1, 1, 3, 3)
+    
     u_padded = torch.nn.functional.pad(u, (1, 1, 1, 1), mode='reflect')  # shape (B, C, H+2, W+2)
     laplacian_u = torch.nn.functional.conv2d(u_padded, laplacian_kernel) / (dx ** 2)  # shape (B, C, H, W)
     return laplacian_u

@@ -5,28 +5,34 @@ from pathlib import Path
 
 import h5py
 import numpy as np
-from tqdm import tqdm
-
 import matplotlib.pyplot as plt
+
 from magtense.micromag import MicromagProblem
+from tqdm import tqdm
 
 
 def gen_s_state(
-    res: tuple,
-    grid_size: tuple,
+    res: tuple[int, int, int],
+    grid_size: tuple[int, int, int],
     cuda: bool = False,
+    cvode: bool = False,
     show: bool = False,
 ) -> np.ndarray:
+    mu0 = 4e-7 * np.pi
+
     problem_ini = MicromagProblem(
         res=res,
         grid_L=grid_size,
         m0=1 / np.sqrt(3),
         alpha=4.42e3,
-        gamma=0.0,
+        grid_pts=None,
+        grid_abc=None,
+        grid_type="uniform",
         cuda=cuda,
+        cvode=cvode,
     )
 
-    h_ext = np.array([1, 1, 1]) / (4 * np.pi * 1e-7)
+    h_ext = np.array([1, 1, 1]) / mu0
 
     def h_ext_fct(t) -> np.ndarray:
         return np.expand_dims(np.where(t < 1e-9, 1e-9 - t, 0), axis=1) * h_ext
@@ -58,6 +64,7 @@ def gen_seq(
     t_steps: int = 500,
     t_per_step: float = 4e-12,
     cuda: bool = False,
+    cvode: bool = False,
     show: bool = False,
 ) -> np.ndarray:
     problem = MicromagProblem(
@@ -65,11 +72,22 @@ def gen_seq(
         grid_L=grid_size,
         m0=m0_state,
         alpha=4.42e3,
-        gamma=2.211e5,
+        gamma=2.21e5,
         A0=1.3e-11,
         Ms=8e5,
         K0=0.0,
+        grid_pts=None,
+        grid_abc=None,
+        grid_type="uniform",
+        exch_rows=None,
+        exch_col=None,
+        exch_val=None,
+        exch_nval=1,
+        exch_nrow=1,
+        exch_ncols=1,
+        passexch=0,
         cuda=cuda,
+        cvode=cvode,
     )
 
     t_end = t_per_step * t_steps
@@ -78,9 +96,7 @@ def gen_seq(
     def h_ext_fct(t) -> np.ndarray:
         return np.expand_dims(t > -1, axis=1) * h_ext
 
-    t_out, M_out, _, _, _, _, _ = problem.run_simulation(
-        t_end, t_steps, h_ext_fct, 2000
-    )
+    t_out, M_out = problem.run_simulation(t_end, t_steps, h_ext_fct, 2000)[:2]
     M_sq = np.squeeze(M_out, axis=2)
 
     if show:
@@ -96,7 +112,7 @@ def db_std_prob_4(
     datapath: Path,
     n_seq: int,
     res: list,
-    grid_size: tuple = (500e-9, 500e-9, 3e-9),
+    grid_size: tuple = (500e-9, 125e-9, 3e-9),
     t_steps: int = 500,
     t_per_step: float = 4e-12,
     h_ext_a: tuple = (0, 360),
@@ -106,7 +122,8 @@ def db_std_prob_4(
     name: str | None = None,
     empty: bool = False,
     cuda: bool = False,
-) -> None:
+    cvode: bool = False,
+) -> tuple[str, int] | None:
     """
     Create a database of sequences with random external fields.
     """
@@ -119,7 +136,7 @@ def db_std_prob_4(
 
     db = h5py.File(f"{datapath}/{fname}.h5", "w")
     db.create_dataset(
-        "sequence", shape=(n_intv, t_steps, res[0], res[1], 3), dtype="float32"
+        "sequence", shape=(n_intv, t_steps, 3, res[0], res[1]), dtype="float32"
     )
     db.create_dataset("field", shape=(n_intv, 3), dtype="float32")
     if not empty:
@@ -172,35 +189,32 @@ def db_std_prob_4(
             t_steps=t_steps,
             t_per_step=t_per_step,
             cuda=cuda,
+            cvode=cvode,
         )
 
         # Suppress output and redirect stdout to /dev/null
         os.dup2(oldstdout_fno, 1)
 
         # Output shape: (t, res_x, res_y, 3)
-        db["sequence"][i] = np.reshape(seq, (t_steps, res[0], res[1], 3))
+        db["sequence"][i] = np.moveaxis(
+            seq.copy().reshape(t_steps, res[1], res[0], 3).swapaxes(1, 2), -1, 1
+        )
 
     db.close()
 
 
 def create_db_mp(
-    data: str,
     n_workers: int | None = None,
     datapath: Path | None = None,
     **kwargs,
 ) -> None:
     if datapath is None:
-        datapath = Path(__file__).parent / ".." / ".." / "data"
+        datapath = Path(__file__).parent / ".." / ".." / ".." / "data"
     if not datapath.exists():
         datapath.mkdir(parents=True)
     kwargs["datapath"] = datapath
 
-    if data == "std_prob_4":
-        target = db_std_prob_4
-    else:
-        raise NotImplementedError
-
-    db_name, n_tasks = target(**kwargs, empty=True)
+    db_name, n_tasks = db_std_prob_4(**kwargs, empty=True)
 
     if n_workers is None:
         n_workers = cpu_count()
@@ -212,7 +226,7 @@ def create_db_mp(
     for i in range(n_workers):
         end_intv = min((i + 1) * intv, n_tasks)
         kwargs["intv"] = [i * intv, end_intv]
-        p = Process(target=target, kwargs=kwargs)
+        p = Process(target=db_std_prob_4, kwargs=kwargs)
         p.daemon = True
         p.start()
         l_p.append(p)
@@ -265,7 +279,8 @@ if __name__ == "__main__":
     db_kwargs = {
         "res": [16, 4, 1],
         "grid_size": [500e-9, 125e-9, 3e-9],
+        "cuda": True,
         "n_seq": 4,
     }
 
-    create_db_mp("std_prob_4", n_workers=1, **db_kwargs)
+    create_db_mp(n_workers=1, **db_kwargs)

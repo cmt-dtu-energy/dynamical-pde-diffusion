@@ -123,7 +123,6 @@ def llg_loss(x, dxdt, obs_a, obs_u, mask_a, mask_u, dx, dy, ch_a, labels):
 
     H_ext = labels.view(x.shape[0], 3, 1, 1)  # Reshape to (B, 3, 1, 1) for broadcasting
 
-    # Iterate over batch dimension to compute demagnetisation field for each sample
     H_eff = torch.zeros_like(m)
     res = [16, 4, 1]
     grid_size = [500e-9, 125e-9, 3e-9]
@@ -132,11 +131,14 @@ def llg_loss(x, dxdt, obs_a, obs_u, mask_a, mask_u, dx, dy, ch_a, labels):
     # )
     mu0 = 4e-7 * torch.pi  # vacuum permeability [H/m]
     t_per_step = 4e-12
+    gamma = 2.21e5
+    alpha = 4.42e3
 
+    # Iterate over batch dimension to compute fields for each sample
     for i in range(m.shape[0]):
         ### Option 1: Calculation of individual field components
         # # Exchange field
-        # laplacian_m = laplacian(m, dx)
+        # laplacian_m = laplacian(m[i], dx)
         # A0 = 1.3e-11  # exchange stiffness [J/m]
         # Ms = 8e5  # saturation magnetization [A/m]
         # H_exch = (2 * A0 / (mu0 * Ms)) * laplacian_m
@@ -168,8 +170,8 @@ def llg_loss(x, dxdt, obs_a, obs_u, mask_a, mask_u, dx, dy, ch_a, labels):
             res=res,
             grid_L=grid_size,
             m0=m[i],
-            alpha=4.42e3,
-            gamma=2.21e5,
+            alpha=alpha,
+            gamma=gamma,
             grid_pts=None,
             grid_abc=None,
             grid_type="uniform",
@@ -204,8 +206,6 @@ def llg_loss(x, dxdt, obs_a, obs_u, mask_a, mask_u, dx, dy, ch_a, labels):
         )
 
     # Compute the LLG right-hand side
-    gamma = 2.21e5
-    alpha = 4.42e3
     mxH = torch.cross(m.permute(0, 2, 3, 1), H_eff.permute(0, 2, 3, 1), dim=-1).permute(
         0, 3, 1, 2
     )
