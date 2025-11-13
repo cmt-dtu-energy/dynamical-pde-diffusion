@@ -15,7 +15,6 @@ def gen_s_state(
     res: tuple[int, int, int],
     grid_size: tuple[int, int, int],
     cuda: bool = False,
-    cvode: bool = False,
     show: bool = False,
 ) -> np.ndarray:
     mu0 = 4e-7 * np.pi
@@ -25,11 +24,7 @@ def gen_s_state(
         grid_L=grid_size,
         m0=1 / np.sqrt(3),
         alpha=4.42e3,
-        grid_pts=None,
-        grid_abc=None,
-        grid_type="uniform",
         cuda=cuda,
-        cvode=cvode,
     )
 
     h_ext = np.array([1, 1, 1]) / mu0
@@ -64,7 +59,6 @@ def gen_seq(
     t_steps: int = 500,
     t_per_step: float = 4e-12,
     cuda: bool = False,
-    cvode: bool = False,
     show: bool = False,
 ) -> np.ndarray:
     problem = MicromagProblem(
@@ -76,18 +70,7 @@ def gen_seq(
         A0=1.3e-11,
         Ms=8e5,
         K0=0.0,
-        grid_pts=None,
-        grid_abc=None,
-        grid_type="uniform",
-        exch_rows=None,
-        exch_col=None,
-        exch_val=None,
-        exch_nval=1,
-        exch_nrow=1,
-        exch_ncols=1,
-        passexch=0,
         cuda=cuda,
-        cvode=cvode,
     )
 
     t_end = t_per_step * t_steps
@@ -122,7 +105,6 @@ def db_std_prob_4(
     name: str | None = None,
     empty: bool = False,
     cuda: bool = False,
-    cvode: bool = False,
 ) -> tuple[str, int] | None:
     """
     Create a database of sequences with random external fields.
@@ -173,6 +155,7 @@ def db_std_prob_4(
         d = (h_ext_n[1] - h_ext_n[0]) * rnd_mat[i, 0] + h_ext_n[0]
         theta = np.deg2rad((h_ext_a[1] - h_ext_a[0]) * rnd_mat[i, 1] + h_ext_a[0])
         h_ext[:2] = d * np.array([np.cos(theta), np.sin(theta)])
+        # Stored in mT
         db["field"][i] = h_ext
 
         # Suppress output and redirect stdout to /dev/null
@@ -189,7 +172,6 @@ def db_std_prob_4(
             t_steps=t_steps,
             t_per_step=t_per_step,
             cuda=cuda,
-            cvode=cvode,
         )
 
         # Suppress output and redirect stdout to /dev/null
