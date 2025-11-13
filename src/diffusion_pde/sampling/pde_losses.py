@@ -167,7 +167,7 @@ def llg_loss(
         oldstdout_fno = os.dup(sys.stdout.fileno())
         os.dup2(devnull.fileno(), 1)
         h_e, _, h_d, h_a = problem_dym.run_simulation(
-            t_end=t_per_step * 10,
+            t_end=t_per_step * 9,
             nt=10,  # Minimum number of steps for rksuite of MagTense to work properly
             fct_h_ext=h_ext_fct,
             nt_h_ext=100,

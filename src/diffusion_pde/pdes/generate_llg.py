@@ -74,12 +74,13 @@ def gen_seq(
     )
 
     t_end = t_per_step * t_steps
+    # Rescale h_ext from mT to A/m
     h_ext = np.array(h_ext) / 1000 / (4 * np.pi * 1e-7)
 
     def h_ext_fct(t) -> np.ndarray:
         return np.expand_dims(t > -1, axis=1) * h_ext
 
-    t_out, M_out = problem.run_simulation(t_end, t_steps, h_ext_fct, 2000)[:2]
+    t_out, M_out = problem.run_simulation(t_end, t_steps + 1, h_ext_fct, 2000)[:2]
     M_sq = np.squeeze(M_out, axis=2)
 
     if show:
@@ -179,7 +180,7 @@ def db_std_prob_4(
 
         # Output shape: (t, res_x, res_y, 3)
         db["sequence"][i] = np.moveaxis(
-            seq.copy().reshape(t_steps, res[1], res[0], 3).swapaxes(1, 2), -1, 1
+            seq[:t_steps].copy().reshape(t_steps, res[1], res[0], 3).swapaxes(1, 2), -1, 1
         )
 
     db.close()
