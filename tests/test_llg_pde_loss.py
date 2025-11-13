@@ -192,6 +192,9 @@ def llg_loss_mt(seed: int = 0, n_t: int = 1, cuda: bool = True, plot: bool = Fal
         m0=m_mt,
         alpha=alpha,
         gamma=gamma,
+        A0=A0,
+        Ms=Ms,
+        K0=K0,
         usereturnhall=1,
         cuda=cuda,
     )
@@ -301,7 +304,7 @@ def llg_loss_mt(seed: int = 0, n_t: int = 1, cuda: bool = True, plot: bool = Fal
 
 
 if __name__ == "__main__":
-    # for seed in range(5):
-    #     print(f"--- Seed {seed} ---")
-    llg_loss_individual(seed=0)
-    llg_loss_mt(seed=0, cuda=True)
+    for seed in range(5):
+        print(f"--- Seed {seed} ---")
+        llg_loss_individual(seed=seed)
+        llg_loss_mt(seed=seed, cuda=True)

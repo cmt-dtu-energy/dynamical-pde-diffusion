@@ -1,7 +1,10 @@
-import magtense
+import os
+import sys
 import numpy as np
 import torch
 import logging
+
+from magtense.micromag import MicromagProblem
 
 from .sample import laplacian
 
@@ -60,7 +63,9 @@ def heat_loss(x, dxdt, obs_a, obs_u, mask_a, mask_u, dx, dy, ch_a, labels):
     return loss_pde, loss_obs_a, loss_obs_u
 
 
-def llg_loss(x, dxdt, obs_a, obs_u, mask_a, mask_u, dx, dy, ch_a, labels):
+def llg_loss(
+    x, dxdt, obs_a, obs_u, mask_a, mask_u, dx, dy, ch_a, labels, cuda: bool = True
+):
     """
     Compute the Landau-Lifshitz-Gilbert (LLG) equation loss components.
 
@@ -121,104 +126,78 @@ def llg_loss(x, dxdt, obs_a, obs_u, mask_a, mask_u, dx, dy, ch_a, labels):
     # Time derivative of Magnetization vector (B, 3, H, W)
     dmdt = dxdt[:, ch_a:, :, :]
 
-    H_ext = labels.view(x.shape[0], 3, 1, 1)  # Reshape to (B, 3, 1, 1) for broadcasting
-
-    H_eff = torch.zeros_like(m)
+    dtype = torch.float32
     res = [16, 4, 1]
     grid_size = [500e-9, 125e-9, 3e-9]
-    # loc = np.meshgrid(
-    #     np.linspace(0, grid_size[0], res[0]), np.linspace(0, grid_size[1], res[1])
-    # )
-    mu0 = 4e-7 * torch.pi  # vacuum permeability [H/m]
+    mu0 = 4e-7 * torch.pi
     t_per_step = 4e-12
     gamma = 2.21e5
     alpha = 4.42e3
+    A0 = 1.3e-11
+    Ms = 8e5
+    K0 = 0.0
+
+    # Reshape to (B, 3, 1, 1) for broadcasting and bring to units [A/m]
+    h_ext = labels.view(x.shape[0], 3, 1, 1) / (1000 * mu0)
+    h_eff = torch.zeros_like(m)
 
     # Iterate over batch dimension to compute fields for each sample
     for i in range(m.shape[0]):
-        ### Option 1: Calculation of individual field components
-        # # Exchange field
-        # laplacian_m = laplacian(m[i], dx)
-        # A0 = 1.3e-11  # exchange stiffness [J/m]
-        # Ms = 8e5  # saturation magnetization [A/m]
-        # H_exch = (2 * A0 / (mu0 * Ms)) * laplacian_m
+        n_magnets = res[0] * res[1] * res[2]
 
-        # # Anisotropy field
-        # H_anis = 0.0
-
-        # # Demagnetisation field
-        # tiles = magtense.magstatics.Tiles(
-        #     n=n_magnets,
-        #     M_rem=Ms / mu0,
-        #     easy_axis=m[i],
-        #     tile_type=2,
-        #     size=[dx, dy, grid_size[2]],  # thin_film
-        #     offset=loc,  # coordinates
-        # )
-        # devnull = open("/dev/null", "w")
-        # oldstdout_fno = os.dup(sys.stdout.fileno())
-        # os.dup2(devnull.fileno(), 1)
-        # _, H_out = magtense.magstatics.run_simulation(tiles, loc)
-        # os.dup2(oldstdout_fno, 1)
-        # H_demag = torch.tensor(H_out[:, :3]) * mu0
-
-        # # Compute effective field
-        # H_eff[i] = H_ext[i] + H_exch + H_demag + H_anis
-
-        ### Option 2: Get solution directly from MagTense
-        problem_dym = magtense.MicromagProblem(
+        # Reshape from  (3, H, W) to (n_magnets, 3)
+        m_mt = m[i].swapaxes(1, 2).reshape(3, -1).T.numpy()
+        problem_dym = MicromagProblem(
             res=res,
             grid_L=grid_size,
-            m0=m[i],
+            m0=m_mt,
             alpha=alpha,
             gamma=gamma,
-            grid_pts=None,
-            grid_abc=None,
-            grid_type="uniform",
-            exch_rows=None,
-            exch_col=None,
-            exch_val=None,
-            exch_nval=1,
-            exch_nrow=1,
-            exch_ncols=1,
-            passexch=0,
-            cuda=True,
-            cvode=False,
+            A0=A0,
+            Ms=Ms,
+            K0=K0,
+            usereturnhall=1,
+            cuda=cuda,
         )
 
         def h_ext_fct(t) -> np.ndarray:
-            return np.expand_dims(t > -1, axis=1) * (
-                H_ext[i].cpu().numpy() / 1000 / mu0
-            )
+            return np.expand_dims(t > -1, axis=1) * h_ext[i, :, 0, 0].numpy()
 
-        H_exch, _, H_demag, H_anis = problem_dym.run_simulation(
-            t_end=t_per_step,
-            nt=1,
+        devnull = open("/dev/null", "w")
+        oldstdout_fno = os.dup(sys.stdout.fileno())
+        os.dup2(devnull.fileno(), 1)
+        h_e, _, h_d, h_a = problem_dym.run_simulation(
+            t_end=t_per_step * 10,
+            nt=10,  # Minimum number of steps for rksuite of MagTense to work properly
             fct_h_ext=h_ext_fct,
-            nt_h_ext=1,
+            nt_h_ext=100,
         )[3:7]
+        os.dup2(oldstdout_fno, 1)
 
-        H_eff[i] = (
-            H_ext[i]
-            + torch.tensor(H_exch.copy())
-            + torch.tensor(H_demag.copy())
-            + torch.tensor(H_anis.copy())
+        # Reshape back to (3, H, W) and negate fields as MagTense returns -H
+        h_exch = torch.tensor(
+            -h_e[1, :, 0].copy().T.reshape(3, res[1], res[0]).swapaxes(1, 2),
+            dtype=dtype,
         )
+        h_demag = torch.tensor(
+            -h_d[1, :, 0].copy().T.reshape(3, res[1], res[0]).swapaxes(1, 2),
+            dtype=dtype,
+        )
+        h_anis = torch.tensor(
+            -h_a[1, :, 0].copy().T.reshape(3, res[1], res[0]).swapaxes(1, 2),
+            dtype=dtype,
+        )
+        h_eff[i] = h_ext[i] + h_exch + h_demag + h_anis
 
     # Compute the LLG right-hand side
-    mxH = torch.cross(m.permute(0, 2, 3, 1), H_eff.permute(0, 2, 3, 1), dim=-1).permute(
-        0, 3, 1, 2
-    )
-    m_cross_mxH = torch.cross(
-        m.permute(0, 2, 3, 1), mxH.permute(0, 2, 3, 1), dim=-1
-    ).permute(0, 3, 1, 2)
-
+    mxH = torch.cross(m, h_eff, dim=1)
+    m_cross_mxH = torch.cross(m, mxH, dim=1)
     llg_rhs = -gamma * mxH - alpha * m_cross_mxH
 
-    loss_pde = torch.norm(dmdt - llg_rhs, 2) / n_magnets
-
+    loss_pde = torch.norm(dmdt - llg_rhs * t_per_step, p=2, dim=1) / n_magnets
     # enforce |m| = 1 constraint
-    loss_norm = torch.norm(torch.norm(m, p=2, dim=1) - 1, p=2)
+    loss_norm = torch.norm(m, p=2, dim=1) - 1
+
     loss_obs_a = torch.norm(mask_a * (a - obs_a), p=2)
     loss_obs_u = torch.norm(mask_u * (m - obs_u), p=2)
 
