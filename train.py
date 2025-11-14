@@ -71,11 +71,18 @@ def main(cfg: DictConfig):
         "config": config,
     })
 
-    save_name = f"{pde_name}_{dataset_name}_{model_name}.pth".replace(" ", "_")
+    save_name = f"{pde_name}_{dataset_name}_{model_name}.pth".replace(" ", "_").replace("-", "_")
     save_path = model_save_path / save_name
 
     logger.info("initializing model, loss function, and starting training")
-    unet = dpde.models.Unet(
+
+    if model_name.lower() == "unet-v2":
+        model_constructor = dpde.models.Unetv2
+    elif model_name.lower() == "unet-small":
+        model_constructor = dpde.models.Unet
+    else:
+        raise ValueError(f"Unknown model name: {model_name}")
+    unet = model_constructor(
         chs=chs,
         label_ch=label_ch,
         noise_ch=noise_ch,

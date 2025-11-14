@@ -1,4 +1,4 @@
-name: 'unet-small'
+name: 'unet-v2'
 chs: [32, 64, 128, 256]
 noise_ch: 32
 sigma_data: 0.5

@@ -103,7 +103,71 @@ class Unet(torch.nn.Module):
         return signal
     
 
-class Unet2(torch.nn.Module):
+class UnetBlock(torch.nn.Module):
+    def __init__(self, 
+        in_ch: int, 
+        out_ch: int, 
+        emb_ch: int, 
+        mode ="", 
+        act_fn: torch.nn.Module = torch.nn.SiLU, 
+        dropout: float = 0.1,
+        skip_scale: float = 2**-0.5
+    ):
+        super().__init__()
+        
+        self.skip_scale = skip_scale
+
+        if mode == "down":
+            self.conv1 = torch.nn.Conv2d(in_ch, out_ch, kernel_size=3, stride=2, padding=1)
+        elif mode == "":
+            self.conv1 = torch.nn.Conv2d(in_ch, out_ch, kernel_size=3, padding=1)
+        elif mode == "up":
+            self.conv1 = torch.nn.Sequential(
+                torch.nn.Upsample(scale_factor=2, mode='nearest'),
+                torch.nn.Conv2d(in_ch, out_ch, kernel_size=3, padding=1)
+            )
+            #self.conv1 = torch.nn.ConvTranspose2d(in_ch, out_ch, kernel_size=3, stride=2, padding=1, output_padding=1)
+
+        self.conv2 = torch.nn.Conv2d(out_ch, out_ch, kernel_size=3, padding=1)
+        torch.nn.init.zeros_(self.conv2.weight)
+        torch.nn.init.zeros_(self.conv2.bias)
+
+        self.emb_layer = torch.nn.Linear(emb_ch, out_ch)
+        self.act_fn = act_fn()
+
+        self.norm1 = torch.nn.GroupNorm(32 if in_ch % 32 == 0 else in_ch, in_ch)
+        self.norm2 = torch.nn.GroupNorm(32 if out_ch % 32 == 0 else out_ch, out_ch)
+
+        self.dropout = torch.nn.Dropout(dropout)
+
+        if mode == "" and in_ch == out_ch:
+            self.skip = torch.nn.Identity()
+        elif mode == "down":
+            self.skip = torch.nn.Sequential(
+                torch.nn.AvgPool2d(2),
+                torch.nn.Conv2d(in_ch, out_ch, kernel_size=1) if in_ch != out_ch else torch.nn.Identity()
+            )
+        elif mode == "up":
+            self.skip = torch.nn.Sequential(
+                torch.nn.Upsample(scale_factor=2, mode='nearest'),
+                torch.nn.Conv2d(in_ch, out_ch, kernel_size=1) if in_ch != out_ch else torch.nn.Identity(),
+            )
+        else:
+            self.skip = torch.nn.Conv2d(in_ch, out_ch, kernel_size=1)
+
+    def forward(self, x: torch.Tensor, emb: torch.Tensor) -> torch.Tensor:
+        orig = x
+        emb = self.emb_layer(emb).unsqueeze(-1).unsqueeze(-1)
+
+        x = self.conv1(self.act_fn(self.norm1(x)))
+        x = x + emb
+        x = self.conv2(self.dropout(self.act_fn(self.norm2(x))))
+        x = x + self.skip(orig)
+
+        return x * self.skip_scale
+    
+
+class Unetv2(torch.nn.Module):
     '''
     Unet taken from deep learning course.
     '''
@@ -120,75 +184,64 @@ class Unet2(torch.nn.Module):
         self.act_fn = act_fn
         self.debug = debug
 
-        self.down_conv = torch.nn.ModuleList()
-        self.up_conv = torch.nn.ModuleList()
+        self.down_blocks = torch.nn.ModuleDict()
+        self.up_blocks = torch.nn.ModuleDict()
 
-        # Construct down-sampling blocks
-        for i in range(len(chs) - 1):
-            block = torch.nn.ModuleList()
-            if i != 0:
-                block.append(
-                    torch.nn.MaxPool2d(kernel_size=2, stride=2)               
-                )
-            block.extend(
-                (torch.nn.Conv2d(chs[i], chs[i+1], kernel_size=3, padding=1),
-                self.act_fn())
+        # create encoder blocks 
+        for i in range(len(chs)-1):
+            mode = "down" if i < len(chs)-2 else ""
+            in_ch = chs[i]
+            out_ch = chs[i+1]
+            self.down_blocks[f"down_{in_ch}->{out_ch}_{mode}"] = UnetBlock(
+                in_ch=in_ch,
+                out_ch=chs[i+1],
+                emb_ch=noise_ch,
+                mode=mode,
+                act_fn=act_fn,
             )
-            self.down_conv.append(torch.nn.Sequential(*block))
-
-        # Construct up-sampling blocks
-        for i in range(len(chs) - 1, 0, -1):
-            block = torch.nn.ModuleList()
-            if i == len(chs) - 1:
-                layer = torch.nn.ConvTranspose2d(chs[i], chs[i-1], kernel_size=3, stride=2, padding=1, output_padding=1)
-            elif i == 1:
-                layer = torch.nn.ConvTranspose2d(chs[i] * 2, chs[i], kernel_size=3, padding=1)  
-            else:
-                layer = torch.nn.ConvTranspose2d(chs[i] * 2, chs[i-1], kernel_size=3, stride=2, padding=1, output_padding=1)
-            block.extend((layer, self.act_fn()))
-            if i == 1:
-                block.append(torch.nn.Conv2d(chs[i], chs[i-1], kernel_size=3, padding=1))
-            self.up_conv.append(torch.nn.Sequential(*block))
-
+        
+        # create decoder blocks
+        for i in range(len(chs)-1, 0, -1):
+            mode = "up" if i < len(chs)-1 else ""
+            in_ch = chs[i] * 2 if i < len(chs)-1 else chs[i]
+            out_ch = chs[i-1]
+            self.up_blocks[f"up_{chs[i]}->{chs[i-1]}_{mode}"] = UnetBlock(
+                in_ch=in_ch,
+                out_ch=out_ch,
+                emb_ch=noise_ch,
+                mode=mode,
+                act_fn=act_fn,
+            )
 
         self.sigma_embedding = PositionalEmbedding(noise_ch)
         self.linear_label = torch.nn.Linear(label_ch, noise_ch)
 
-        self.linear_embed = torch.nn.ModuleList([
-            torch.nn.Linear(noise_ch, chs[i]) for i in range(1, len(chs), 1)
-        ])
 
-    def forward(self, x: torch.Tensor, sigma: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
-        #assume x has shape (b, ch, h, w) and t has shape (b, label_ch)
+    def forward(self, x, sigma, labels) -> torch.Tensor:
+        emb_sigma = self.sigma_embedding(sigma)
+        emb_label = self.linear_label(labels)
 
-        emb = self.sigma_embedding(sigma)
-        if t.ndim == 1:
-            t = t[:, None]
-        label_emb = self.linear_label(t)
-        emb = emb + label_emb
-        embs = [self.linear_embed[i](emb) for i in range(len(self.linear_embed))]
+        skips = []
+        for i, down_block in enumerate(self.down_blocks.values()):
+            x = down_block(x, emb_sigma + emb_label)
+            if i < len(self.down_blocks) - 1:
+                skips.append(x)
+                if self.debug:
+                    print(f"Skip Block {i}: {x.shape}")
+            if self.debug:
+                print(f"Down Block {i}: {x.shape}")
 
-        signal = x
-        signals = []
-        for i, conv in enumerate(self.down_conv):
-            signal = conv(signal)
-            signal = signal  + embs[i][..., None, None]
-            if i < len(self.down_conv) - 1:
-                signals.append(signal)
+        for i, up_block in enumerate(self.up_blocks.values()):
+            if i > 0:
+                skip = skips.pop()
+                if self.debug:
+                    print(f"Using Skip Block {len(self.down_blocks)-2 - i}: {skip.shape}")
+                x = torch.cat([x, skip], dim=1)
+            x = up_block(x, emb_sigma + emb_label)
+            if self.debug:
+                print(f"Up Block {i}: {x.shape}")
 
-            if self.debug: print(f"Down conv {i}: {signal.shape}")
-
-        for i, tconv in enumerate(self.up_conv):
-            if i == 0:
-                signal = tconv(signal)
-            else:
-                signal = torch.cat((signal, signals[-i]), dim=-3)
-                signal = tconv(signal)
-            if i < len(self.up_conv) - 1:
-                signal = signal + embs[-i-2][..., None, None]
-                
-            if self.debug: print(f"Up conv {i}: {signal.shape}")
-        return signal
+        return x
 
 
 class EDMWrapper(torch.nn.Module):

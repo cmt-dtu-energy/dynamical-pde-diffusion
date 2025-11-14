@@ -45,7 +45,7 @@ def train(
                 data, labels = data.to(device), labels.to(device)
 
                 optimizer.zero_grad()
-                loss = loss_fn(model, data, labels).sum()
+                loss = loss_fn(model, data, labels).mean()
                 loss.backward()
 
                 running_loss += loss.item()

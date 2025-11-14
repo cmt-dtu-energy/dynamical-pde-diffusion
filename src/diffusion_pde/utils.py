@@ -15,14 +15,17 @@ def get_repo_root():
     
 
 def get_net_from_config(cfg):
-    from diffusion_pde.models import Unet, EDMWrapper
+    from diffusion_pde.models import Unet, Unetv2, EDMWrapper
 
     in_ch = cfg.dataset.net.in_ch
     label_ch = cfg.dataset.net.label_ch
     chs = [in_ch] + list(cfg.model.chs)
     noise_ch = cfg.model.noise_ch
-    if cfg.model.name.lower() == "unet small":
+    name = cfg.model.name.lower().replace(" ", "-").replace("_", "-")
+    if name == "unet-small":
         unet = Unet(chs=chs, label_ch=label_ch, noise_ch=noise_ch)
+    elif name == "unet-v2":
+        unet = Unetv2(chs=chs, label_ch=label_ch, noise_ch=noise_ch)
     else:
         raise ValueError(f"Unknown model name: {cfg.model.name}")
     edm = EDMWrapper(unet=unet, sigma_data=cfg.model.sigma_data)

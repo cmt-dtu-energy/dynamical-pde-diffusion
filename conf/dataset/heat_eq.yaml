@@ -23,18 +23,3 @@ sampling:
   zeta_pde: 0.4
   num_steps: 50
   loss_func: "diffusion_pde.sampling.heat_loss"
-
-#validation:
-#  data_gen_func: "diffusion_pde.pdes.generate_heat"
-#  func_kwargs:
-#    N: 10
-#    B: 32
-#    steps: 50
-#    T: 0.5
-#    device: "cuda"
-#    seed: 12
-#    Lx: 1.0
-#    Ly: 1.0
-#    Nx: 64
-#    Ny: 64
-#    time_spacing: "lineart"
