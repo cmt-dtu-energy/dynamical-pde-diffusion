@@ -1,0 +1,31 @@
+data:
+  pde: "heat"
+  name: 'heat_logt'
+  datapath: 'data/heat_logt.hdf5'  # path to save the generated dataset
+  
+start_at_t0: true        # whether to randomize initial time t0 for each sample
+method: "joint"  # "joint" for learning forward and inverse, "forward" for forward only
+loss: "edm" #  "edm" for standard EDM loss, "physics" for EDM with physics loss
+
+net:
+  in_ch: 2
+  label_ch: 2
+
+training:
+  batch_size: 64
+  shuffle: True
+  num_epochs: 1000
+  learning_rate: 1e-4
+  weight_decay: 0.0
+  physics_loss: false
+  physics_loss_coeff: 1.0
+
+sampling:
+  sample_shape: [2, 64, 64] # shape of single sample (C, H, W)
+  batch_size: 32            # batch size for sampling
+  ch_a: 1
+  zeta_a: 50.0
+  zeta_u: 40.0
+  zeta_pde: 0.4
+  num_steps: 50
+  loss_func: "diffusion_pde.sampling.heat_loss"

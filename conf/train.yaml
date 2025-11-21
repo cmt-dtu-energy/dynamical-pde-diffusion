@@ -1,11 +1,11 @@
 defaults:
-  - dataset: heat_eq
+  - dataset: heat_eq_joint
   - model: unet
   - _self_
 
 wandb:
   entity: 'philiphohwy-danmarks-tekniske-universitet-dtu'
-  project: 'dynamical-pde-diffusion'
+  project: 'dynamical-pde-diffusion-final-final'
   dir: ${oc.env:REPO_ROOT,${oc.env:PWD}}/logs
   name: None
 

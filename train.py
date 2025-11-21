@@ -2,7 +2,6 @@ import hydra
 import torch
 import logging
 import diffusion_pde as dpde
-import numpy as np
 from pathlib import Path
 from omegaconf import DictConfig, OmegaConf
 
@@ -12,11 +11,8 @@ logger = logging.getLogger(__name__)
 def main(cfg: DictConfig):
 
     # load dataset configuration
-    pde_name = cfg.dataset.data.pde.lower()
     dataset_name = cfg.dataset.data.name.lower()
-    datapath = Path(dpde.utils.get_repo_root()) / cfg.dataset.data.datapath
-    batch_size = cfg.dataset.training.batch_size
-    shuffle = cfg.dataset.training.shuffle
+    method = cfg.dataset.method.lower()
 
     # load training configuration
     num_epochs = cfg.dataset.training.num_epochs
@@ -25,43 +21,28 @@ def main(cfg: DictConfig):
 
     # load model configuration
     model_name = cfg.model.name.lower()
-    chs = list(cfg.model.chs)
-    noise_ch = cfg.model.noise_ch
-    sigma_data = cfg.model.sigma_data
 
-    # model save path:
-    model_save_path = Path(cfg.model_save_path)
+    logger.info(f"training configuration for dataset: {dataset_name}, model: {model_name}, method: {method}")
 
     logger.info("loading training dataset and dataloader")
-    trainloader = dpde.datasets.get_dataloader(
-        datapath=datapath,
-        batch_size=batch_size,
-        shuffle=shuffle,
-    )
-
+    trainloader = dpde.datasets.get_dataloader(cfg)
 
     # set up for training
-    in_ch = cfg.dataset.net.in_ch
-    label_ch = cfg.dataset.net.label_ch
-    chs = [in_ch] + chs
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+    logger.info(f"using device: {device}")
 
     # load wandb configuration
     wandb_kwargs = OmegaConf.to_container(cfg.wandb, resolve=True)
     if wandb_kwargs["name"] == "None":
         wandb_kwargs["name"] = None
     job_type = "train"
-    group = f"{pde_name}/{model_name}"
-    run_name = f"{pde_name}/{dataset_name}/{model_name}".replace(" ", "-")
-    tags = [pde_name, dataset_name, model_name]
-    config = {
-        "pde": pde_name,
-        "dataset": dataset_name,
-        "model": model_name,
-        "chs": chs,
-        "noise_ch": noise_ch,
-        "label_ch": label_ch,
-    }
+    group = f"{model_name}"
+    run_name = f"{dataset_name}/{method}/{model_name}".replace(" ", "-").replace("_", "-")
+    tags = [dataset_name, model_name]
+    #model_config = OmegaConf.to_container(cfg.model, resolve=True)
+
+    config = OmegaConf.to_container(cfg, resolve=True)
+    config["run_name"] = run_name
 
     wandb_kwargs.update({
         "name": run_name,
@@ -71,29 +52,11 @@ def main(cfg: DictConfig):
         "config": config,
     })
 
-    save_name = f"{pde_name}_{dataset_name}_{model_name}.pth".replace(" ", "_").replace("-", "_")
-    save_path = model_save_path / save_name
-
     logger.info("initializing model, loss function, and starting training")
 
-    if model_name.lower() == "unet-v2":
-        model_constructor = dpde.models.Unetv2
-    elif model_name.lower() == "unet-small":
-        model_constructor = dpde.models.Unet
-    else:
-        raise ValueError(f"Unknown model name: {model_name}")
-    unet = model_constructor(
-        chs=chs,
-        label_ch=label_ch,
-        noise_ch=noise_ch,
-    )
+    edm = dpde.utils.get_net_from_config(cfg)
 
-    edm = dpde.models.EDMWrapper(
-        unet=unet,
-        sigma_data=sigma_data
-    )
-
-    loss_fn = dpde.models.EDMLoss(sigma_data=sigma_data)
+    loss_fn = dpde.utils.get_loss_from_config(cfg)
 
     edm.to(device)
 
@@ -106,9 +69,7 @@ def main(cfg: DictConfig):
         lr=learning_rate,
         weight_decay=weight_decay,
         wandb_kwargs=wandb_kwargs,
-        save_path=save_path,
     )
-    #torch.save(edm.state_dict(), model_save_path / f"{pde_name}_{dataset_name}_{model_name}.pth")
 
 if __name__ == "__main__":
     main()

@@ -17,11 +17,13 @@ def train(
     lr: float,
     weight_decay: float,
     wandb_kwargs: dict,
-    save_path: Path,
+    save_path: Path | None = None,
 ):  
     '''
     training function for diffusion model
     '''
+    if save_path is None:
+        save_path = Path().cwd() / "model.pth"
     #log_dir = get_repo_root() / "logs"
     #wandb_kwargs.update({"dir": str(log_dir)})
     
@@ -35,21 +37,26 @@ def train(
             "epochs": epochs
         })
 
+        model.to(device)
         optimizer = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
         model.train()
         
         logger.info("starting training loop")
         for epoch in range(epochs):
             running_loss = 0.0
-            for i, (data, labels) in enumerate(dataloader):
-                data, labels = data.to(device), labels.to(device)
+            for i, kwargs in enumerate(dataloader):
+                for k in kwargs:
+                    kwargs[k] = kwargs[k].to(device)
+                
+                X = kwargs.pop("X")
+                labels = kwargs.pop("labels")
 
                 optimizer.zero_grad()
-                loss = loss_fn(model, data, labels).mean()
+                loss = loss_fn(model, X, labels, **kwargs).mean()
                 loss.backward()
+                optimizer.step()
 
                 running_loss += loss.item()
-                optimizer.step()
             
             epoch_loss = running_loss / len(dataloader)
 
@@ -60,7 +67,8 @@ def train(
         torch.save(model.state_dict(), save_path)
 
         logger.info("logging model artifact to wandb")
-        art_name = f"{run.config['pde']}-{run.config['dataset']}-{run.config['model']}".lower().replace(" ", "-").replace("_", "-")
+        art_name = run.config["run_name"].replace("/", "-")
+        logger.info("artifact name: %s", art_name)
         artifact = wandb.Artifact(name=art_name, type="model", metadata=dict(run_id=run.id, **run.config))
         artifact.add_file(str(save_path))
         run.log_artifact(artifact)

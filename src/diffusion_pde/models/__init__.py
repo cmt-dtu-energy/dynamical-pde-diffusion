@@ -1,3 +1,3 @@
 from .loss import EDMLoss
-from .nets import Unet, Unetv2, EDMWrapper
-__all__ = ["EDMLoss", "Unet", "Unetv2", "EDMWrapper"]
+from .nets import Unet, EDMUNet, EDMWrapper
+__all__ = ["EDMLoss", "Unet", "EDMUNet", "EDMWrapper"]

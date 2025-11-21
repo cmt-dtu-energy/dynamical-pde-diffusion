@@ -2,6 +2,8 @@ import torch
 import numpy as np
 import h5py
 from typing import Optional
+from pathlib import Path
+from diffusion_pde.utils import get_repo_root
 
 class DiffusionDataset(torch.utils.data.Dataset):
     """
@@ -25,31 +27,24 @@ class DiffusionDataset(torch.utils.data.Dataset):
         Random number generator for reproducibility, by default None.
     """
     def __init__(self,
-        init_state: np.ndarray, 
         data: np.ndarray, 
         t_steps: np.ndarray, 
         labels: Optional[np.ndarray] = None,
+        start_at_t0: bool = True,
         generator: Optional[torch.Generator] = None
     ) -> None:
         super().__init__()
-        # assume init_state is (N, ch_a, h, w)
         # assume data is (N, ch_u, h, w, t)
-        assert len(init_state.shape) == 4, f"Dimensions of 'init_state' should be (N, ch_a, h, w) but got {init_state.shape}"
         assert len(data.shape) == 5, f"Dimensions of 'data' should be (N, ch_u, h, w, t) but got {data.shape}"
-        assert init_state.shape[0] == data.shape[0], f"Number of initial points and trajectories must match but got {init_state.shape[0]} and {data.shape[0]}"
-
-        self.init_state = torch.from_numpy(init_state).float()
-        self.data = torch.from_numpy(data).float()
-        self.labels = torch.from_numpy(labels).float() if labels is not None else None
+        self.start_at_t0 = start_at_t0
+        
+        self.data = torch.tensor(data).float()
+        self.labels = torch.tensor(labels).float() if labels is not None else None
         if self.labels is not None and self.labels.ndim == 1:
             self.labels = self.labels.reshape((-1, 1))  # ensure labels is (N, label_dim):
-        self.t_steps = torch.from_numpy(t_steps).float()
+        self.t_steps = torch.tensor(t_steps).float()
 
         self.N, self.T = data.shape[0], data.shape[-1]
-
-        self.input_ch = self.init_state.shape[1] + self.data.shape[1]
-        self.label_ch = 1 + (self.labels.shape[1] if self.labels is not None else 0)
-
         self.g = generator
 
     def __len__(self) -> int:
@@ -58,19 +53,26 @@ class DiffusionDataset(torch.utils.data.Dataset):
     def __getitem__(self, idx) -> tuple[torch.Tensor, torch.Tensor]:
         
         # sample random timestep
-        t_idx = torch.randint(0, self.T, (1,), generator=self.g).item()
+        t0_idx = 0
+        if not self.start_at_t0:
+            t0_idx = torch.randint(0, self.T, (1,), generator=self.g).item()
+
+        tf_idx = torch.randint(t0_idx, self.T, (1,), generator=self.g).item()
 
         # slice data snapshot at timestep
-        snap = self.data[idx, ..., t_idx] # shape (ch_u, h, w)
-        X = torch.cat((self.init_state[idx], snap), dim=0)  # shape (ch_a + ch_u, h, w)
+        snap_t0 = self.data[idx, ..., t0_idx]  # shape (ch_u, h, w)
+        snap_tf = self.data[idx, ..., tf_idx] # shape (ch_u, h, w)
+        X = torch.cat((snap_t0, snap_tf), dim=0)  # shape (ch_a + ch_u, h, w)
         # get corresponding time value
-        label = self.t_steps[t_idx]
+        tau = self.t_steps[tf_idx] - self.t_steps[t0_idx]
+
         if self.labels is not None:
-            label = torch.cat((torch.tensor([label]), self.labels[idx]), dim=0)
-        return X, label
+            label = torch.cat((torch.tensor([tau]), self.labels[idx]), dim=0)
+
+        return {"X": X, "labels": label}
     
 
-class DiffusionDataset2(torch.utils.data.Dataset):
+class DiffusionDatasetForward(torch.utils.data.Dataset):
     """
     Diffusion dataset compatible with torch DataLoader.
     Each item is a tuple (X, label) where X is the concatenation of the
@@ -93,18 +95,22 @@ class DiffusionDataset2(torch.utils.data.Dataset):
         data: np.ndarray, 
         t_steps: np.ndarray, 
         labels: Optional[np.ndarray] = None,
+        obs: Optional[np.ndarray] = None,
+        start_at_t0: bool = False,
         generator: Optional[torch.Generator] = None
     ) -> None:
         super().__init__()
         # assume data is (N, ch_u, h, w, t)
         assert len(data.shape) == 5, f"Dimensions of 'data' should be (N, ch_u, h, w, t) but got {data.shape}"
 
-        self.data = torch.from_numpy(data).float()
-        self.labels = torch.from_numpy(labels).float() if labels is not None else None
+        self.start_at_t0 = start_at_t0
+
+        self.data = torch.tensor(data).float()
+        self.labels = torch.tensor(labels).float() if labels is not None else None
         if self.labels is not None and self.labels.ndim == 1:
             self.labels = self.labels.reshape((-1, 1))  # ensure labels is (N, label_dim):
-        self.t_steps = torch.from_numpy(t_steps).float()
-
+        self.obs = torch.tensor(obs).float() if obs is not None else None
+        self.t_steps = torch.tensor(t_steps).float()
         self.N, self.T = data.shape[0], data.shape[-1]
 
         self.g = generator
@@ -115,22 +121,26 @@ class DiffusionDataset2(torch.utils.data.Dataset):
     def __getitem__(self, idx) -> tuple[torch.Tensor, torch.Tensor]:
         
         # sample random timestep
-        t0_idx = torch.randint(0, self.T-1, (1,), generator=self.g).item()
-        tf_idx = torch.randint(t0_idx + 1, self.T, (1,), generator=self.g).item()
+        t0_idx = 0
+        if not self.start_at_t0:
+            t0_idx = torch.randint(0, self.T, (1,), generator=self.g).item()
+
+        tf_idx = torch.randint(t0_idx, self.T, (1,), generator=self.g).item()
 
         # slice data snapshot at timestep
         # get corresponding time value
-        X = self.data[idx, ..., [t0_idx, tf_idx]]  # shape (ch_u, h, w, 2)
-        label = self.t_steps[tf_idx]
+        obs = self.data[idx, ..., t0_idx]  # shape (ch_u, h, w, 2)
+        X = self.data[idx, ..., tf_idx] # shape (ch_u, h, w)
+
+        tau = self.t_steps[tf_idx] - self.t_steps[t0_idx]
+
         if self.labels is not None:
-            label = torch.cat((torch.tensor([label]), self.labels[idx]), dim=0)
-        return X, label
+            label = torch.cat((torch.tensor([tau]), self.labels[idx]), dim=0)
+
+        return {"obs": obs, "X": X, "labels": label}
+
     
-def get_dataloader(
-    datapath: str,
-    batch_size: int,
-    shuffle: bool = True,      
-):
+def get_dataloader(cfg):
     """
     Utility function to load dataset from .h5 file and create a dataloader.
 
@@ -148,12 +158,25 @@ def get_dataloader(
     torch.utils.data.DataLoader
         DataLoader for the dataset.
     """
+    datapath = Path(cfg.dataset.data.datapath)
+    repository_root = get_repo_root()
+    if not datapath.is_absolute():
+        datapath = repository_root / datapath
+
+    method = cfg.dataset.method
+    start_at_t0 = cfg.dataset.start_at_t0
+    batch_size = cfg.dataset.training.batch_size
+    shuffle = cfg.dataset.training.shuffle
+
     with h5py.File(datapath, "r") as f:
-        init_state = f["A"][:]  # (N, ch_a, h, w)
         data = f["U"][:]        # (N, ch_u, h, w, T)
         t_steps = f["t_steps"][:]     # (T,)
         labels = f["labels"][:] if "labels" in f else None  # (N,) or (N, label_dim)
 
-    dataset = DiffusionDataset(init_state, data, t_steps, labels=labels)
+    if method == "forward":
+        dataset = DiffusionDatasetForward(data, t_steps, labels=labels, start_at_t0=start_at_t0)
+    else:
+        dataset = DiffusionDataset(data, t_steps, labels=labels, start_at_t0=start_at_t0)
+
     dataloader = torch.utils.data.DataLoader(dataset, batch_size=batch_size, shuffle=shuffle)
     return dataloader

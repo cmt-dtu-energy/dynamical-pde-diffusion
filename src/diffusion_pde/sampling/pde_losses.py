@@ -57,7 +57,7 @@ def heat_loss(x, dxdt, obs_a, obs_u, mask_a, mask_u, dx, dy, ch_a, labels):
     loss_pde = torch.norm(dudt - alpha * laplacian_u, 2) / (
         u_N.shape[-1] * u_N.shape[-2]
     )
-    loss_obs_a = torch.norm(mask_a * (a_N - obs_a), 2)
+    loss_obs_a = torch.norm(mask_a * (a_N - obs_a), 2) 
     loss_obs_u = torch.norm(mask_u * (u_N - obs_u), 2)
 
     return loss_pde, loss_obs_a, loss_obs_u
@@ -127,7 +127,7 @@ def llg_loss(
     dmdt = dxdt[:, ch_a:, :, :]
 
     dtype = torch.float32
-    res = [16, 4, 1]
+    res = [64, 16, 1]
     grid_size = [500e-9, 125e-9, 3e-9]
     mu0 = 4e-7 * torch.pi
     t_per_step = 4e-12
@@ -146,7 +146,7 @@ def llg_loss(
         n_magnets = res[0] * res[1] * res[2]
 
         # Reshape from  (3, H, W) to (n_magnets, 3)
-        m_mt = m[i].swapaxes(1, 2).reshape(3, -1).T.numpy()
+        m_mt = m[i].swapaxes(1, 2).reshape(3, -1).T.detach().cpu().numpy()
         problem_dym = MicromagProblem(
             res=res,
             grid_L=grid_size,
@@ -161,7 +161,7 @@ def llg_loss(
         )
 
         def h_ext_fct(t) -> np.ndarray:
-            return np.expand_dims(t > -1, axis=1) * h_ext[i, :, 0, 0].numpy()
+            return np.expand_dims(t > -1, axis=1) * h_ext[i, :, 0, 0].detach().cpu().numpy()
 
         devnull = open("/dev/null", "w")
         oldstdout_fno = os.dup(sys.stdout.fileno())

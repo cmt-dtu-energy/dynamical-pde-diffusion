@@ -3,15 +3,19 @@ data:
   name: 'llg'
   datapath: 'data/llg.hdf5'  # path to save the generated dataset
 
+start_at_t0: true        # whether to randomize initial time t0 for each sample
+method: "forward"  # "joint" for learning forward and inverse, "forward" for forward only
+loss: "edm" #  "edm" for standard EDM loss, "physics" for EDM with physics loss
+
 net:
-  in_ch: 6      # 2 * 3 for magnetization vector (m_x, m_y, m_z)
+  in_ch: 3      # 3 for magnetization vector (m_x, m_y, m_z)
   label_ch: 4   # 3 for external field + 1 for time
 
 training:
   batch_size: 32
   shuffle: True
   num_epochs: 1000
-  learning_rate: 5e-4
+  learning_rate: 1e-4
   weight_decay: 0.0
 
 sampling:
