@@ -272,26 +272,6 @@ def main():
     save_name = f"heat_{t_spacing}t.hdf5"
     save_path = get_repo_root() / "data" / save_name
 
-    #save_dataset(
-    #    filepath=str(save_path),
-    #    A_train=A[:num_train],
-    #    U_train=U[:num_train],
-    #    labels_train=labels[:num_train],
-    #    A_test=A[num_train:],
-    #    U_test=U[num_train:],
-    #    labels_test=labels[num_train:],
-    #    t_steps=t_steps,
-    #    T=T,
-    #    dx=Lx / (S - 1),
-    #    name="heat_logt",
-    #    description="2D heat equation with linear Dirichlet BCs, pseudospectral interior DST with lifting. Log-spaced time.",
-    #    S=S,
-    #    Lx=Lx,
-    #    Ly=Ly,
-    #    alpha_logrange=(-2.0, 0.0),
-    #    steps=steps,
-    #)
-
     save_data(
         filepath=str(save_path),
         A=A,

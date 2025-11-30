@@ -1,3 +1,4 @@
+import copy
 import torch
 import torch.nn.functional as F
 
@@ -305,7 +306,7 @@ class EDMUNet(torch.nn.Module):
     def forward(self, x, sigma, labels=None, obs=None):
         """
         x:      [B, Cx, H, W]   (noisy state)
-        obs:    [B, Co, H, W]   (initial condition / BCs)
+        obs:    [B, Co, H, W]   (initial condition / BCs, optional)
         sigma:  [B] or [B,1]    (noise level)
         labels: [B, label_dim]  (optional)
         """
@@ -362,3 +363,57 @@ class EDMWrapper(torch.nn.Module):
         D_x = c_skip * x + c_out * F_x          # denoised data
 
         return D_x
+    
+
+
+class EMAWrapper:
+    def __init__(
+        self, 
+        model: torch.nn.Module, 
+        ema_decay: float = 0.999,
+        ema_device: str | torch.device | None = None,
+        update_every: int = 1,
+        warmup_steps: int = 0,
+    ):
+        self.model = model                  # maintain reference to original model
+        self.ema_decay = ema_decay          # decay rate for EMA
+        self.update_every = update_every    # update frequency
+        self.warmup_steps = warmup_steps    # number of warmup steps for EMA decay
+        self.num_updates = 0                # counter for number of updates
+
+        self.ema_model = copy.deepcopy(model)   # create EMA model
+        self.ema_model.eval()                   # set to eval mode    
+        for param in self.ema_model.parameters():
+            param.requires_grad_(False)
+
+        if ema_device is not None:
+            self.ema_model.to(ema_device)
+        self.ema_device = next(self.ema_model.parameters()).device
+
+
+    def _get_decay(self):
+        """get the decay rate, possibly with warmup"""
+        if self.warmup_steps <= 0:
+            return self.ema_decay
+        warmup_frac = min(1.0, self.num_updates / self.warmup_steps)
+        return 1.0 - warmup_frac * (1.0 - self.ema_decay)
+
+
+    @torch.no_grad()
+    def update(self):
+        """Update the EMA model parameters."""
+        self.num_updates += 1   # update update counter
+        if self.num_updates % self.update_every != 0:
+            return
+        
+        decay = self._get_decay()
+        msd = self.model.state_dict()   # actual model state dict
+        for k, v_ema in self.ema_model.state_dict().items():
+            v = msd[k]
+            if v.device != self.ema_device:
+                v = v.to(self.ema_device)
+            
+            if v.dtype.is_floating_point:
+                v_ema.mul_(decay).add_(v, alpha=1 - decay)
+            else:
+                v_ema.copy_(v)    

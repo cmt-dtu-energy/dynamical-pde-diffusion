@@ -3,9 +3,10 @@ data:
   name: 'llg'
   datapath: 'data/llg.hdf5'  # path to save the generated dataset
 
-start_at_t0: true        # whether to randomize initial time t0 for each sample
+start_at_t0: false        # whether to randomize initial time t0 for each sample
 method: "joint"  # "joint" for learning forward and inverse, "forward" for forward only
-loss: "edm" #  "edm" for standard EDM loss, "physics" for EDM with physics loss
+residual_estimation: null # used for physics loss, either "ME" or "SE"
+pretrained_path: null  # path to pretrained model for physics loss, null if training from scratch
 
 net:
   in_ch: 6      # 2 * 3 for magnetization vector (m_x, m_y, m_z)
@@ -17,6 +18,15 @@ training:
   num_epochs: 1000
   learning_rate: 1e-4
   weight_decay: 0.0
+  physics_loss: false       # apply physics loss during training
+  physics_loss_coeff: 1.0   # coefficient for physics loss term
+  gradient_clipping: 1.0    # max norm for gradient clipping
+  val_interval: 10          # validate every n epochs
+  checkpoint_interval: 20   # save checkpoint every n epochs
+  ema_decay: 0.999          # exponential moving average decay
+  ema_warmup: 20            # number of epochs to warm up EMA
+  ema_update_interval: 1    # update EMA every n steps
+  ema_device: "cpu"         # device for EMA parameters
 
 sampling:
   sample_shape: [6, 64, 16] # shape of single sample (C, H, W)

@@ -6,104 +6,11 @@ import wandb
 import matplotlib.pyplot as plt
 import logging
 from diffusion_pde.utils import get_function_from_path
-from diffusion_pde.sampling import edm_sampler
+from diffusion_pde.sampling import EDMHeatSampler
 from omegaconf import DictConfig, OmegaConf
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
-
-
-def get_data_from_hdf5(pth: Path):
-    """
-    Load dataset from an HDF5 file.
-    
-    Parameters
-    ----------
-    pth : Path
-        Path to the HDF5 file.
-
-    Returns
-    -------
-    U : torch.Tensor
-        Solution data tensor.
-    A : torch.Tensor
-        Initial conditions tensor.
-    t_steps : torch.Tensor
-        Time steps tensor.
-    labels : torch.Tensor
-        Labels tensor.
-    attrs : dict
-        Additional attributes from the HDF5 file.
-        Must contain the following
-        - T : float
-            Total time duration.
-        - dx : float
-            Spatial grid size in x direction.
-        - dy : float
-            Spatial grid size in y direction.
-    """
-    import h5py
-
-    with h5py.File(pth, "r") as f:
-        A = f["A"][:]
-        U = f["U"][:]
-        labels = f["labels"][:]
-        t_steps = f["t_steps"][:]
-
-        attrs = dict(f.attrs)
-
-    return torch.tensor(U), torch.tensor(A), torch.tensor(t_steps), torch.tensor(labels), attrs
-
-
-def data_gen_wrapper(validation_cfg: DictConfig):
-    """
-    wrapper for PDE data generating functions for model validation
-
-    Parameters
-    ----------
-    cfg : DictConfig
-        Configuration object containing data generation function path and arguments.
-
-    Returns
-    -------
-    """
-    data_gen_func = get_function_from_path(validation_cfg.data_gen_func)
-    func_args = validation_cfg.func_kwargs
-
-    N = func_args.N
-    B = func_args.B
-    Lx = func_args.Lx
-    Ly = func_args.Ly
-    Nx = func_args.Nx
-    Ny = func_args.Ny
-    steps = func_args.steps
-    T = func_args.T
-    device = func_args.device
-    ic_seed = func_args.seed
-
-    if "generate_heat" in validation_cfg.data_gen_func:
-        time_spacing = func_args.get("time_spacing", "lineart")
-
-        if time_spacing == "lineart":
-            time_steps = torch.linspace(0, T, steps + 1)
-        elif time_spacing == "logt":
-            time_steps = torch.logspace(-4, math.log10(T), steps + 1)
-        else:
-            raise ValueError(f"Unknown time spacing: {time_spacing}")
-        dt = time_steps[1:] - time_steps[:-1]
-        Us, As, tsteps, labels = data_gen_func(N=N, B=B, S=Nx, steps=steps, dt=dt, Lx=Lx, Ly=Ly, device=device, ic_seed=ic_seed)
-
-    elif "generate_llg" in validation_cfg.data_gen_func:
-        raise NotImplementedError("LLG data generation not implemented in this wrapper yet.")
-    
-    else:
-        raise ValueError(f"Unknown data generation function: {validation_cfg.data_gen_func}")
-    Us = torch.tensor(Us)
-    As = torch.tensor(As)
-    tsteps = torch.tensor(tsteps)
-    labels = torch.tensor(labels)
-    return Us, As, tsteps, labels
-
 
 def random_boundary_mask(H, W, *, frac_obs=0.5, n=None, device=None, generator=None, include_corners=True):
     """
@@ -233,7 +140,6 @@ def load_mask_from_dir(pth):
 
 def validate_model(
     model: torch.nn.Module,
-    #validation_cfg: DictConfig,
     sampling_cfg: DictConfig,
     observation_cfg: DictConfig,
     wandb_kwargs: dict,
@@ -263,11 +169,9 @@ def validate_model(
     loss_func = get_function_from_path(sampling_cfg.loss_func)
 
     logger.info("Loading validation data from HDF5...")
-    Us, As, tsteps, labels, attrs = get_data_from_hdf5(Path(observation_cfg.dataset_path))
-    dx = attrs["dx"]
-    dy = attrs["dy"]
-    ###dx = validation_cfg.func_kwargs.Lx / (sample_shape[1] - 1)
-    ###dy = validation_cfg.func_kwargs.Ly / (sample_shape[2] - 1)
+    #Us, As, tsteps, labels, attrs = get_data_from_hdf5(Path(observation_cfg.dataset_path))
+    #dx = attrs["dx"]
+    #dy = attrs["dy"]
 
     s_shape = (batch_size, *sample_shape)
 

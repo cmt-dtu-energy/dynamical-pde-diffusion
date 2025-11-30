@@ -4,9 +4,15 @@ import numpy as np
 import torch
 import logging
 
-from magtense.micromag import MicromagProblem
-
 from .sample import laplacian
+
+try:
+    from magtense.micromag import MicromagProblem
+except ImportError:
+    def MicromagProblem(*args, **kwargs):
+        raise ImportError(
+            "MagTense is not installed. Please install MagTense to use llg_loss."
+        )
 
 
 logger = logging.getLogger(__name__)

@@ -1,10 +1,9 @@
-import math
+import h5py
 from pathlib import Path
-from omegaconf import OmegaConf
 import wandb
 import importlib
-import torch
-from diffusion_pde.models.pde_losses import PDE_LOSS_REGISTRY
+from diffusion_pde.models.loss import EDMLoss, EDMHeatLoss
+from omegaconf import OmegaConf
 
 
 
@@ -17,22 +16,22 @@ def get_repo_root():
 
 
 def get_loss_from_config(cfg):
-    from diffusion_pde.models.loss import EDMLoss, EDMPhysicsLoss
-    from diffusion_pde.models.pde_losses import heat_pde_loss
-
-    if cfg.dataset.loss == "edm":
+    if not cfg.dataset.training.physics_loss:
         loss_fn = EDMLoss()
-    elif cfg.dataset.loss == "physics":
-        raise NotImplementedError("Physics loss is not yet implemented in this function.")
-        ch_a = cfg.dataset.net.in_ch // 2 if cfg.dataset.method == "joint" else 0
-        loss_fn = EDMPhysicsLoss(
-            pde_loss_fn=PDE_LOSS_REGISTRY[cfg.dataset.data.pde],
-            pde_loss_kwargs={"dx": 1.0},
-            pde_loss_coeff=0.01,
-            ch_a=ch_a
-        )
     else:
-        raise ValueError(f"Unknown loss type: {cfg.dataset.loss}")
+        datapath = Path(cfg.dataset.data.datapath)
+        repository_root = get_repo_root()
+        if not datapath.is_absolute():
+            datapath = repository_root / datapath
+        with h5py.File(datapath, "r") as f:
+            dx = f.attrs["dx"]
+
+        loss_fn = EDMHeatLoss(
+            dx=dx,
+            pde_loss_coeff=cfg.dataset.training.physics_loss_coeff,
+            method=cfg.dataset.method,
+            residual_estimation=cfg.dataset.residual_estimation,
+        )
     return loss_fn
 
 

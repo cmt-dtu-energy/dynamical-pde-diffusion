@@ -21,18 +21,14 @@ def main(cfg):
 
     # load wandb configuration
     wandb_kwargs = OmegaConf.to_container(cfg.wandb, resolve=True)
-    if wandb_kwargs["name"] == "None":
-        wandb_kwargs["name"] = None
 
     job_type = "validate"
     group = f"{pde_name}/{model_name}"
     run_name = f"{pde_name}/{dataset_name}/{model_name}/validate".replace(" ", "-")
-    tags = [pde_name, dataset_name, model_name]
-    config = {
-        "pde": pde_name,
-        "dataset": dataset_name,
-        "model": model_name,
-    }
+    tags = [pde_name, dataset_name, model_name, "validate"]
+    
+    config = OmegaConf.to_container(cfg, resolve=True)
+    config["run_name"] = run_name
 
     wandb_kwargs.update({
         "name": run_name,

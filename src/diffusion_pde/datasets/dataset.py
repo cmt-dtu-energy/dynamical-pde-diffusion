@@ -138,9 +138,9 @@ class DiffusionDatasetForward(torch.utils.data.Dataset):
             label = torch.cat((torch.tensor([tau]), self.labels[idx]), dim=0)
 
         return {"obs": obs, "X": X, "labels": label}
-
     
-def get_dataloader(cfg):
+    
+def get_dataloaders(cfg):
     """
     Utility function to load dataset from .h5 file and create a dataloader.
 
@@ -167,16 +167,29 @@ def get_dataloader(cfg):
     start_at_t0 = cfg.dataset.start_at_t0
     batch_size = cfg.dataset.training.batch_size
     shuffle = cfg.dataset.training.shuffle
+    val_percent = cfg.dataset.training.val_percent
 
     with h5py.File(datapath, "r") as f:
         data = f["U"][:]        # (N, ch_u, h, w, T)
         t_steps = f["t_steps"][:]     # (T,)
         labels = f["labels"][:] if "labels" in f else None  # (N,) or (N, label_dim)
 
+    N = data.shape[0]
+    val_size = int(N * val_percent)
+    train_size = N - val_size
+    
+    idxs = torch.arange(N)
+    if shuffle:
+        idxs = idxs[torch.randperm(N)]
+    train_idxs, val_idxs = idxs[:train_size], idxs[train_size:]
+
     if method == "forward":
-        dataset = DiffusionDatasetForward(data, t_steps, labels=labels, start_at_t0=start_at_t0)
+        dataset = DiffusionDatasetForward(data[train_idxs, ...], t_steps, labels=labels[train_idxs] if labels is not None else None, start_at_t0=start_at_t0)
+        valset = DiffusionDatasetForward(data[val_idxs, ...], t_steps, labels=labels[val_idxs] if labels is not None else None, start_at_t0=start_at_t0)
     else:
-        dataset = DiffusionDataset(data, t_steps, labels=labels, start_at_t0=start_at_t0)
+        dataset = DiffusionDataset(data[train_idxs, ...], t_steps, labels=labels[train_idxs] if labels is not None else None, start_at_t0=start_at_t0)
+        valset = DiffusionDataset(data[val_idxs, ...], t_steps, labels=labels[val_idxs] if labels is not None else None, start_at_t0=start_at_t0)
 
     dataloader = torch.utils.data.DataLoader(dataset, batch_size=batch_size, shuffle=shuffle)
-    return dataloader
+    valloader = torch.utils.data.DataLoader(valset, batch_size=batch_size, shuffle=False)
+    return dataloader, valloader

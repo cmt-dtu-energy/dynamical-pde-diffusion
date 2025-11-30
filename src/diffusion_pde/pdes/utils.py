@@ -71,7 +71,7 @@ def save_data(
     filepath: str,
     A: np.ndarray,
     U: np.ndarray,
-    labels: np.ndarray,
+    labels: np.ndarray | None,
     t_steps: np.ndarray,
     T: float,
     dx: float,
@@ -116,7 +116,8 @@ def save_data(
     with h5py.File(filepath, "w") as f:
         f.create_dataset("A", data=A)
         f.create_dataset("U", data=U)
-        f.create_dataset("labels", data=labels)
+        if labels is not None:
+            f.create_dataset("labels", data=labels)
         f.create_dataset("t_steps", data=t_steps)
 
         f.attrs["T"] = T

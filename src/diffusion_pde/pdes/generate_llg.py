@@ -7,7 +7,13 @@ import h5py
 import numpy as np
 import matplotlib.pyplot as plt
 
-from magtense.micromag import MicromagProblem
+try:
+    from magtense.micromag import MicromagProblem
+except ImportError:
+    def MicromagProblem(*args, **kwargs):
+        raise ImportError(
+            "MagTense is not installed. Please install MagTense to use llg_loss."
+        )
 from tqdm import tqdm
 
 
