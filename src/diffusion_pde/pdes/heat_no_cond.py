@@ -105,7 +105,7 @@ def generate_heat_no_cond(
 
 def main():
     print("Generating heat equation dataset without conditioning...")
-    N = 3000          # number of samples
+    N = 500          # number of samples
     T = 0.005           # final time
     S = 64            # spatial grid size
     Lx = 1.0          # x domain size
@@ -127,7 +127,7 @@ def main():
         ic_seed=ic_seed,
     )   # (N,S,S,2)
 
-    save_path = get_repo_root() / "data" / "heat_no_cond.hdf5"
+    save_path = get_repo_root() / "data" / "heat_no_cond_test.hdf5"
     save_data(
         filepath=str(save_path),
         A=u_data[..., 0],
