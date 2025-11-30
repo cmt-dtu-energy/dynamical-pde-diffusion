@@ -90,20 +90,21 @@ class Unet(torch.nn.Module):
 
 
         self.sigma_embedding = PositionalEmbedding(noise_ch)
-        self.linear_label = torch.nn.Linear(label_ch, noise_ch)
+
+        if label_ch > 0:
+            self.linear_label = torch.nn.Linear(label_ch, noise_ch)
 
         self.linear_embed = torch.nn.ModuleList([
             torch.nn.Linear(noise_ch, chs[i]) for i in range(1, len(chs), 1)
         ])
 
-    def forward(self, x: torch.Tensor, sigma: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
+    def forward(self, x, sigma, labels=None):
         #assume x has shape (b, ch, h, w) and t has shape (b, label_ch)
 
         emb = self.sigma_embedding(sigma)
-        if t.ndim == 1:
-            t = t[:, None]
-        label_emb = self.linear_label(t)
-        emb = emb + label_emb
+        if labels is not None:
+            label_emb = self.linear_label(labels)
+            emb = emb + label_emb
         embs = [self.linear_embed[i](emb) for i in range(len(self.linear_embed))]
 
         signal = x

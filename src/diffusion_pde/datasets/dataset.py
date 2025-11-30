@@ -5,6 +5,34 @@ from typing import Optional
 from pathlib import Path
 from diffusion_pde.utils import get_repo_root
 
+class NoTimeDataset(torch.utils.data.Dataset):
+    """
+    Dataset for heat equation without conditioning.
+
+    Parameters
+    ----------
+    data : np.ndarray
+        Numpy array of shape (N, S, S, 2) containing the dataset
+    """
+    def __init__(
+        self,
+        data: np.ndarray,
+        labels: np.ndarray | None = None
+    ):
+        self.data = torch.tensor(data).float()  # (N, C, S, S, 2)
+        self.labels = torch.tensor(labels).float() if labels is not None else None
+        self.N = data.shape[0]
+
+    def __len__(self) -> int:
+        return self.N
+    
+    def __getitem__(self, idx) -> torch.Tensor:
+
+        X = torch.cat((self.data[idx, ..., 0], self.data[idx, ..., 1]), dim=0)  # (2*C, S, S)
+        labels = self.labels[idx] if self.labels is not None else None
+        return {"X": X, "labels": labels}
+    
+
 class DiffusionDataset(torch.utils.data.Dataset):
     """
     Diffusion dataset compatible with torch DataLoader.
@@ -139,7 +167,25 @@ class DiffusionDatasetForward(torch.utils.data.Dataset):
 
         return {"obs": obs, "X": X, "labels": label}
     
+
+def collate_optional(batch):
+    X = [item["X"] for item in batch]
+    labels = [item["labels"] for item in batch]
+
+    X = torch.stack(X, dim=0)
+    if labels[0] is not None:
+        labels = torch.stack(labels, dim=0)
+    else:
+        labels = None
+
+    if "obs" in batch[0].keys():
+        obs = [item["obs"] for item in batch]
+        obs = None if obs[0] is None else torch.stack(obs, dim=0)
+        return {"obs": obs, "X": X, "labels": labels}
     
+    return {"X": X, "labels": labels}
+
+
 def get_dataloaders(cfg):
     """
     Utility function to load dataset from .h5 file and create a dataloader.
@@ -183,13 +229,16 @@ def get_dataloaders(cfg):
         idxs = idxs[torch.randperm(N)]
     train_idxs, val_idxs = idxs[:train_size], idxs[train_size:]
 
-    if method == "forward":
+    if "no_cond" in cfg.dataset.data.name.lower() or "no_time" in cfg.dataset.data.name.lower():
+        dataset = NoTimeDataset(data[train_idxs, ...], labels=labels[train_idxs] if labels is not None else None)
+        valset = NoTimeDataset(data[val_idxs, ...], labels=labels[val_idxs] if labels is not None else None)
+    elif method == "forward":
         dataset = DiffusionDatasetForward(data[train_idxs, ...], t_steps, labels=labels[train_idxs] if labels is not None else None, start_at_t0=start_at_t0)
         valset = DiffusionDatasetForward(data[val_idxs, ...], t_steps, labels=labels[val_idxs] if labels is not None else None, start_at_t0=start_at_t0)
     else:
         dataset = DiffusionDataset(data[train_idxs, ...], t_steps, labels=labels[train_idxs] if labels is not None else None, start_at_t0=start_at_t0)
         valset = DiffusionDataset(data[val_idxs, ...], t_steps, labels=labels[val_idxs] if labels is not None else None, start_at_t0=start_at_t0)
 
-    dataloader = torch.utils.data.DataLoader(dataset, batch_size=batch_size, shuffle=shuffle)
-    valloader = torch.utils.data.DataLoader(valset, batch_size=batch_size, shuffle=False)
+    dataloader = torch.utils.data.DataLoader(dataset, batch_size=batch_size, shuffle=shuffle, collate_fn=collate_optional)
+    valloader = torch.utils.data.DataLoader(valset, batch_size=batch_size, shuffle=False, collate_fn=collate_optional)
     return dataloader, valloader

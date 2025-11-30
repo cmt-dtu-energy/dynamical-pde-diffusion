@@ -2,8 +2,8 @@ import math
 import torch
 import numpy as np
 from diffusion_pde.utils import get_repo_root
-from diffusion_pde.pdes import save_dataset, save_data
-from .generate_heat import make_grid, dirichlet_sine_basis, sine2d_forward, sine2d_inverse, linear_bc_field, random_gaussian_blobs
+from diffusion_pde.pdes import save_data
+from diffusion_pde.pdes.heat import make_grid, dirichlet_sine_basis, sine2d_forward, sine2d_inverse, linear_bc_field, random_gaussian_blobs
 
 
 @torch.no_grad()
@@ -104,13 +104,14 @@ def generate_heat_no_cond(
 
 
 def main():
-    N = 1000          # number of samples
+    print("Generating heat equation dataset without conditioning...")
+    N = 3000          # number of samples
     T = 0.005           # final time
     S = 64            # spatial grid size
     Lx = 1.0          # x domain size
     Ly = 1.0          # y domain size
     batch_size = 64
-    device = "cuda" if torch.cuda.is_available() else "cpu"
+    device = "cuda:0" if torch.cuda.is_available() else "cpu"
     dtype = torch.float32
     ic_seed = 42
 
@@ -142,3 +143,7 @@ def main():
         notes="Heat equation dataset without conditioning: u_t = u_xx + u_yy, Dirichlet BCs with linear lift.",
     )
     print(f"Saved dataset to {save_path}")
+
+
+if __name__ == "__main__":
+    main()

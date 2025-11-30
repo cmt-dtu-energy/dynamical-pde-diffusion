@@ -63,7 +63,7 @@ def train(
             for i, kwargs in enumerate(dataloader):
                 global_step += 1
                 for k in kwargs:
-                    kwargs[k] = kwargs[k].to(device)
+                    kwargs[k] = kwargs[k].to(device) if kwargs[k] is not None else None
                 
                 X = kwargs.pop("X")
                 labels = kwargs.pop("labels")
@@ -96,7 +96,7 @@ def train(
                 with torch.no_grad():
                     for j, val_kwargs in enumerate(valloader):
                         for k in val_kwargs:
-                            val_kwargs[k] = val_kwargs[k].to(device)
+                            val_kwargs[k] = val_kwargs[k].to(device) if val_kwargs[k] is not None else None
                         
                         X_val = val_kwargs.pop("X")
                         labels_val = val_kwargs.pop("labels")
