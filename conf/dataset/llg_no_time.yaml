@@ -1,7 +1,7 @@
 data:
   pde: 'llg'
-  name: 'llg'
-  datapath: 'data/llg.hdf5'  # path to save the generated dataset
+  name: 'llg_no_time'
+  datapath: 'data/llg_no_time.hdf5'  # path to save the generated dataset
 
 start_at_t0: false        # whether to randomize initial time t0 for each sample
 method: "joint"  # "joint" for learning forward and inverse, "forward" for forward only
@@ -10,12 +10,12 @@ pretrained_path: null  # path to pretrained model for physics loss, null if trai
 
 net:
   in_ch: 6      # 2 * 3 for magnetization vector (m_x, m_y, m_z)
-  label_ch: 4   # 3 for external field + 1 for time
+  label_ch: 3   # 3 for external field
 
 training:
   batch_size: 64
   shuffle: True
-  num_epochs: 700
+  num_epochs: 1000
   learning_rate: 1e-4
   weight_decay: 0.0
   physics_loss: false

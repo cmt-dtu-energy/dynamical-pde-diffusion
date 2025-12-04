@@ -27,13 +27,3 @@ training:
   ema_warmup: 20
   ema_update_interval: 1
   ema_device: "cpu"
-
-sampling:
-  sample_shape: [6, 64, 16] # shape of single sample (C, H, W)
-  batch_size: 32            # batch size for sampling
-  ch_a: 3
-  zeta_a: 50.0
-  zeta_u: 40.0
-  zeta_pde: 0.4
-  num_steps: 50
-  loss_func: "diffusion_pde.sampling.heat_loss"
