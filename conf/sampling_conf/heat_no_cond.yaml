@@ -1,0 +1,15 @@
+# sampler hyperparameters
+zeta_pde: 20.0
+zeta_a: 20.0
+zeta_u: 0.5
+num_steps: 50
+sigma_min: 0.002
+sigma_max: 80.0
+rho: 7.0
+sample_shape: [64, 64]
+num_channels: 2
+batch_size: 32
+max_num_samples: 1000
+
+pretrained_path: /home/s204790/dynamical-pde-diffusion/pretrained_models/7revrf5r/ema_model.pth
+test_data_path: data/heat_no_cond_test2.hdf5

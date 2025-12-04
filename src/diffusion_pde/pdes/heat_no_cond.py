@@ -18,6 +18,7 @@ def generate_heat_no_cond_batched(
     device: str = "cuda",       
     dtype: torch.dtype = torch.float32,
     ic_seed: int | None = None,
+    n_blobs: tuple[int, int] = (1, 3)
 ):
     device = torch.device(device)
     a = torch.empty(B, device=device, dtype=dtype).uniform_(-0.5, 0.5)
@@ -27,7 +28,7 @@ def generate_heat_no_cond_batched(
     w = linear_bc_field(a, b, c, X, Y)  # (B,S,S)
 
     # Initial condition (random blobs), then force boundary to w
-    u0_raw = random_gaussian_blobs(B, S, X, Y, device=device, dtype=dtype, seed=ic_seed)
+    u0_raw = random_gaussian_blobs(B, S, X, Y, device=device, dtype=dtype, seed=ic_seed, n_blobs=n_blobs) # (B,S,S)
     u0 = u0_raw.clone()
     u0[:,  0, :] = w[:,  0, :]
     u0[:, -1, :] = w[:, -1, :]
@@ -72,6 +73,7 @@ def generate_heat_no_cond(
     device: str = "cuda",
     dtype: torch.dtype = torch.float32,
     ic_seed: int | None = None,
+    n_blobs: tuple[int, int] = (1, 3),
 ):
     X, Y = make_grid(S, Lx, Ly, device=device, dtype=dtype)   # (S,S), (S,S)
     N_int = S - 2
@@ -94,6 +96,7 @@ def generate_heat_no_cond(
             device=device,
             dtype=dtype,
             ic_seed=(ic_seed + start if ic_seed is not None else None),
+            n_blobs=n_blobs,
         )   # (B,S,S,2)
 
         end = start + b_size
@@ -114,6 +117,7 @@ def main():
     device = "cuda:0" if torch.cuda.is_available() else "cpu"
     dtype = torch.float32
     ic_seed = 42
+    n_blobs = (4, 8)
 
     u_data = generate_heat_no_cond(
         N=N,
@@ -125,9 +129,10 @@ def main():
         device=device,
         dtype=dtype,
         ic_seed=ic_seed,
+        n_blobs=n_blobs,
     )   # (N,S,S,2)
 
-    save_path = get_repo_root() / "data" / "heat_no_cond_test.hdf5"
+    save_path = get_repo_root() / "data" / "heat_no_cond_test2.hdf5"
     save_data(
         filepath=str(save_path),
         A=u_data[..., 0],
@@ -140,6 +145,7 @@ def main():
         S=S,
         Lx=Lx,
         Ly=Ly,
+        n_blobs=n_blobs,
         notes="Heat equation dataset without conditioning: u_t = u_xx + u_yy, Dirichlet BCs with linear lift.",
     )
     print(f"Saved dataset to {save_path}")

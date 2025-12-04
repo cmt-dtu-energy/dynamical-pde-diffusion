@@ -1,0 +1,30 @@
+data:
+  pde: "heat"
+  name: 'heat_no_time'
+  datapath: 'data/heat_no_time.hdf5'  # path to save the generated dataset
+  
+start_at_t0: false        # whether to randomize initial time t0 for each sample
+method: "joint"  # "joint" for learning forward and inverse, "forward" for forward only
+residual_estimation: null # used for physics loss, either "ME" or "SE"
+pretrained_path: null  # path to pretrained model for physics loss, null if training from scratch
+
+net:
+  in_ch: 2
+  label_ch: 1
+
+training:
+  batch_size: 64
+  shuffle: True
+  num_epochs: 500
+  learning_rate: 1e-4
+  weight_decay: 0.0
+  physics_loss: false
+  physics_loss_coeff: 1.0
+  gradient_clipping: 1.0
+  val_interval: 10
+  val_percent: 0.1
+  checkpoint_interval: 20
+  ema_decay: 0.999
+  ema_warmup: 20
+  ema_update_interval: 1
+  ema_device: "cpu"

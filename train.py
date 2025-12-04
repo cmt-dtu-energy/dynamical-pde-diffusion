@@ -40,12 +40,11 @@ def main(cfg: DictConfig):
 
     # load wandb configuration
     wandb_kwargs = OmegaConf.to_container(cfg.wandb, resolve=True)
-    if wandb_kwargs["name"] == "None":
-        wandb_kwargs["name"] = None
+
     job_type = "train"
     group = f"{model_name}"
     run_name = f"{dataset_name}/{method}/{model_name}".replace(" ", "-").replace("_", "-")
-    tags = [dataset_name, model_name]
+    tags = [dataset_name, model_name, job_type]
     #model_config = OmegaConf.to_container(cfg.model, resolve=True)
 
     config = OmegaConf.to_container(cfg, resolve=True)

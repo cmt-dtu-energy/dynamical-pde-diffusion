@@ -37,6 +37,12 @@ def X_and_dXdt_fd(net, x, sigma, labels, eps=1e-5, no_grad=True, **kwargs):
     dXdt : torch.Tensor
         Derivative of the output with respect to time t, of shape (B, C, H, W).
     """
+
+    if labels is None:
+        u0 = net(x, sigma, labels, **kwargs)
+        dudt_fd = torch.zeros_like(u0)
+        return u0, dudt_fd
+    
     lbl_p = labels.detach().clone(); lbl_m = labels.detach().clone()
     lbl_p[:, 0] += eps
     lbl_m[:, 0] -= eps
@@ -151,6 +157,7 @@ class Sampler(ABC):
         device,
         sample_shape,
         num_channels,
+        num_samples,
         num_steps=18,
         sigma_min=0.002,
         sigma_max=80.0,
@@ -161,6 +168,7 @@ class Sampler(ABC):
         self.device = device
         self.sample_shape = sample_shape
         self.num_channels = num_channels
+        self.num_samples = num_samples
         self.num_steps = num_steps
         self.sigma_min = sigma_min
         self.sigma_max = sigma_max
@@ -173,7 +181,7 @@ class Sampler(ABC):
     @torch.no_grad()
     def sample(
         self,
-        labels,
+        labels=None,
         net_obs=None,
         num_steps=None,     # number of sampling steps
         sigma_min=None,     # minimum sigma
@@ -193,8 +201,9 @@ class Sampler(ABC):
         sigmas = getattr(self.net, "round_sigma", lambda x: x)(sigmas)
         sigmas = torch.cat([sigmas, torch.zeros_like(sigmas[:1])])  # length N+1, last = 0
 
-        B = labels.shape[0]
-        labels = labels.to(device=self.device, dtype=dt_f)
+        B = labels.shape[0] if labels is not None else self.num_samples
+        if labels is not None:
+            labels = labels.to(device=self.device, dtype=dt_f)
         if net_obs is not None:
             net_obs = net_obs.to(device=self.device, dtype=dt_f)
             args = (labels, net_obs)
@@ -239,6 +248,8 @@ class EDMHeatSampler(Sampler):
         device,
         sample_shape,
         num_channels,
+        num_samples,
+        dx,
         num_steps=18,
         sigma_min=0.002,
         sigma_max=80.0,
@@ -249,18 +260,19 @@ class EDMHeatSampler(Sampler):
             device,
             sample_shape,
             num_channels,
+            num_samples,
             num_steps,
             sigma_min,
             sigma_max,
             rho,
     )
+        self.dx = dx
     
 
     def sample_conditional(
         self,
-        labels,             # (B, label_dim) extra conditioning your Unet expects; use zeros if None
+        labels=None,             # (B, label_dim) extra conditioning your Unet expects; use zeros if None
         net_obs=None,       # if network accepts obs as input
-        dx=None,                 # spatial grid size
         obs_a=None,         # observations of initial condition
         obs_u=None,         # observations of solution at time T
         mask_a=None,        # masks for obs_a
@@ -277,7 +289,6 @@ class EDMHeatSampler(Sampler):
         if self.num_channels == 2:   
             return self.sample_joint(
                 labels,
-                dx,
                 obs_a,
                 obs_u,
                 mask_a,
@@ -294,7 +305,6 @@ class EDMHeatSampler(Sampler):
         else:
             return self.sample_forward(
                 labels,
-                dx,
                 obs_u,
                 mask_u,
                 zeta_u,
@@ -310,8 +320,7 @@ class EDMHeatSampler(Sampler):
     
     def sample_joint(
         self,
-        labels,             # (B, label_dim) extra conditioning your Unet expects; use zeros if None
-        dx,                 # spatial grid size
+        labels,             # (B, label_dim) extra conditioning your Unet expects, None for unconditional
         obs_a,         # observations of initial condition
         obs_u,         # observations of solution at time T
         mask_a,        # masks for obs_a
@@ -341,8 +350,9 @@ class EDMHeatSampler(Sampler):
         sigmas = getattr(self.net, "round_sigma", lambda x: x)(sigmas)
         sigmas = torch.cat([sigmas, torch.zeros_like(sigmas[:1])])  # length N+1, last = 0
 
-        B = labels.shape[0]
-        labels = labels.to(device=self.device, dtype=dt_f)
+        B = labels.shape[0] if labels is not None else self.num_samples
+        if labels is not None:
+            labels = labels.to(device=self.device, dtype=dt_f)
         
         latents = torch.randn((B, self.num_channels, *self.sample_shape), device=self.device, dtype=dt_t)
 
@@ -375,8 +385,8 @@ class EDMHeatSampler(Sampler):
                 loss_a = torch.sqrt(torch.sum((mask_a * (x_N[:, :1, :, :] - obs_a)) ** 2))
 
             # PDE loss for DPS sampling
-            lap_u = laplacian(x_N[:, 1:, :, :], dx)
-            alphas = labels[:, 1].to(dt_t).view(-1, 1, 1, 1)
+            lap_u = laplacian(x_N[:, 1:, :, :], self.dx)
+            alphas = labels[:, -1].to(dt_t).view(-1, 1, 1, 1) if labels is not None else 1.0
             dudt = dxdt[:, 1:, :, :]
             loss_pde = torch.sqrt(torch.sum((dudt - alphas * lap_u)**2)) / (self.sample_shape[-2] * self.sample_shape[-1])  # normalize by spatial size
             
@@ -401,7 +411,6 @@ class EDMHeatSampler(Sampler):
     def sample_forward(
         self,
         labels,             # (B, label_dim) extra conditioning your Unet expects; use zeros if None
-        dx,                 # spatial grid size
         obs_u,         # observations of solution at time T
         mask_u,        # masks for obs_u
         zeta_u,        # weight for obs_u loss
@@ -428,8 +437,9 @@ class EDMHeatSampler(Sampler):
         sigmas = getattr(self.net, "round_sigma", lambda x: x)(sigmas)
         sigmas = torch.cat([sigmas, torch.zeros_like(sigmas[:1])])  # length N+1, last = 0
 
-        B = labels.shape[0]
-        labels = labels.to(device=self.device, dtype=dt_f)
+        B = labels.shape[0] if labels is not None else self.num_samples
+        if labels is not None:
+            labels = labels.to(device=self.device, dtype=dt_f)
         if net_obs is not None:
             net_obs = net_obs.to(device=self.device, dtype=dt_f)
             args = (labels, net_obs)
@@ -464,8 +474,8 @@ class EDMHeatSampler(Sampler):
                 loss_u = torch.sqrt(torch.sum((mask_u * (x_N - obs_u)) ** 2))
 
             # PDE loss for DPS sampling
-            lap_u = laplacian(x_N, dx)
-            alphas = labels[:, 1].to(dt_t).view(-1, 1, 1, 1)
+            lap_u = laplacian(x_N, self.dx)
+            alphas = labels[:, -1].to(dt_t).view(-1, 1, 1, 1) if labels is not None else 1.0
             dudt = dxdt
             loss_pde = torch.sqrt(torch.sum((dudt - alphas * lap_u)**2)) / (self.sample_shape[-2] * self.sample_shape[-1])  # normalize by spatial size
 
@@ -486,3 +496,20 @@ class EDMHeatSampler(Sampler):
         losses = losses.detach().cpu().numpy() if return_losses else None
         return x, losses
 
+
+class sampling_context:
+    def __init__(self, sampler: Sampler):
+        self.sampler = sampler
+
+    def __enter__(self):
+        self.prev_fp32_prec = torch.backends.cudnn.conv.fp32_precision
+        torch.backends.cudnn.conv.fp32_precision = 'tf32'
+        self.sampler.net.eval()
+        self.sampler.net.to(self.sampler.device)
+        #return self.sampler
+    
+    def __exit__(self, exc_type, exc_value, traceback):
+        torch.backends.cudnn.conv.fp32_precision = self.prev_fp32_prec
+        self.sampler.net.to(torch.device("cpu"))
+        torch.cuda.empty_cache()
+        torch.cuda.synchronize()

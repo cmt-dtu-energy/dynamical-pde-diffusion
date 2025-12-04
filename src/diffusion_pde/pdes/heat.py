@@ -238,6 +238,8 @@ def main():
     N = 5000
     S = 64
     steps = 64
+    #steps = 1
+    #T = 0.00268554501235485076904296875000
     T = 0.5
     Lx, Ly = 1.0, 1.0
     alpha_logrange = (-2.5, 0.5)
@@ -257,7 +259,7 @@ def main():
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
     dtype = torch.float32
-    seed = 12
+    seed = None
 
     print(f"generating heat equation data (log time): N={N}, S={S}, B={B}, T={T:.4f}, steps={steps}")
 
@@ -270,6 +272,7 @@ def main():
     print("computation done, saving data.")
 
     save_name = f"heat_{t_spacing}t.hdf5"
+    #save_name = f"heat_no_time_test.hdf5"
     save_path = get_repo_root() / "data" / save_name
 
     save_data(

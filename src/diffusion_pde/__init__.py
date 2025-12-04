@@ -1,3 +1,3 @@
-from . import datasets, models, sampling, training, pdes, validation, utils
+from . import datasets, model_testing, models, sampling, training, pdes, utils
 
-__all__ = ["datasets", "models", "sampling", "training", "pdes", "validation", "utils"]
+__all__ = ["datasets", "models", "sampling", "training", "pdes", "test_loop", "utils"]
