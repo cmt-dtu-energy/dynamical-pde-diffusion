@@ -497,6 +497,37 @@ class EDMHeatSampler(Sampler):
         return x, losses
 
 
+class JointSampler(Sampler):
+    def __init__(
+        self,
+        net,
+        device,
+        sample_shape,
+        num_channels,
+        num_samples,
+        loss_fn,
+        loss_kwargs,
+        num_steps=18,
+        sigma_min=0.002,
+        sigma_max=80.0,
+        rho=7.0,
+    ):
+        super().__init__(
+            net,
+            device,
+            sample_shape,
+            num_channels,
+            num_samples,
+            num_steps,
+            sigma_min,
+            sigma_max,
+            rho,
+    )
+        self.loss_fn = loss_fn
+        self.loss_kwargs = loss_kwargs
+
+    
+
 class sampling_context:
     def __init__(self, sampler: Sampler):
         self.sampler = sampler
