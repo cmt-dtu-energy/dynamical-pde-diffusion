@@ -79,28 +79,36 @@ def main(cfg: DictConfig) -> None:
     edm.load_state_dict(torch.load(pretrained_path, weights_only=True))
     
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
     # load sampler:
     if "heat" in dataset_name:
         with h5py.File(dpde.utils.get_repo_root() / test_data_path, "r") as f:
             dx = f.attrs["dx"]
-        sampler = dpde.sampling.EDMHeatSampler(
-            net=edm,
-            device=device,
-            sample_shape=sample_shape,
-            num_channels=num_channels,
-            num_samples=batch_size,
-            dx=dx,
-            num_steps=num_steps,
-            sigma_min=sigma_min,
-            sigma_max=sigma_max,
-            rho=rho,
-        )
+        pde_loss_fn = dpde.sampling.pde_losses.heat_loss2
+        pde_loss_kwargs = {"dx": dx}
+        out_and_grad_fn = dpde.sampling.X_and_dXdt_fd
     
     elif "llg" in dataset_name:
-        raise NotImplementedError("LLG sampler not implemented in this example.")
+        pde_loss_fn = dpde.sampling.pde_losses.llg_loss2
+        pde_loss_kwargs = {}
+        out_and_grad_fn = dpde.sampling.X_and_dXdt_dummy
     else:
         raise ValueError(f"Unknown dataset name: {dataset_name}")
+    
+    sampler = dpde.sampling.JointSampler(
+        net=edm,
+        device=device,
+        sample_shape=sample_shape,
+        num_channels=num_channels,
+        num_samples=batch_size,
+        ch_a=num_channels // 2,
+        loss_fn=pde_loss_fn,
+        loss_kwargs=pde_loss_kwargs,
+        num_steps=num_steps,
+        sigma_min=sigma_min,
+        sigma_max=sigma_max,
+        rho=rho,
+        out_and_grad_fn=out_and_grad_fn,
+    )
 
     # test model
     dpde.model_testing.test_loop(

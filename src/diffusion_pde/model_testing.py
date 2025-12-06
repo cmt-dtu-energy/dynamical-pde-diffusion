@@ -168,10 +168,6 @@ def test_loop(
     wandb_kwargs: dict,
     mask_a: torch.Tensor | None = None,
     mask_u: torch.Tensor | None = None,
-    num_steps: int = 50,
-    sigma_min=0.002,
-    sigma_max=80.0,
-    rho=7.0,
     max_num_samples: int = 1000,
 ):
 
@@ -199,7 +195,7 @@ def test_loop(
                 if labels is not None:
                     labels = labels.expand(sampler.num_samples, -1)  # (num_samples, label_dim)
 
-                samples, _ = sampler.sample_joint(
+                samples, _ = sampler.sample(
                     labels=labels,
                     obs_a=A,
                     obs_u=U,
@@ -208,10 +204,6 @@ def test_loop(
                     zeta_a=zeta_a,
                     zeta_u=zeta_u,
                     zeta_pde=zeta_pde,
-                    num_steps=num_steps,
-                    sigma_min=sigma_min,
-                    sigma_max=sigma_max,
-                    rho=rho,
                     return_losses=False,
                 ) # (B, 2C, H, W)
                 obs = torch.cat([A, U], dim=1)  # (1, 2C, H, W)

@@ -1,0 +1,15 @@
+# sampler hyperparameters
+zeta_pde: 10.0
+zeta_a: 10.0
+zeta_u: 0.5
+num_steps: 300
+sigma_min: 0.002
+sigma_max: 80.0
+rho: 7.0
+sample_shape: [64, 16]
+num_channels: 6
+batch_size: 32
+max_num_samples: 1000
+
+pretrained_path: /home/s204790/dynamical-pde-diffusion/logs/hydra/2025-12-05_12-45-38/checkpoints/ema_model_best.pth
+test_data_path: data/llg_test2.hdf5

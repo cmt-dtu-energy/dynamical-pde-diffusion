@@ -1,0 +1,15 @@
+# sampler hyperparameters
+zeta_pde: 10.0
+zeta_a: 10.0
+zeta_u: 0.5
+num_steps: 50
+sigma_min: 0.002
+sigma_max: 80.0
+rho: 7.0
+sample_shape: [64, 16]
+num_channels: 6
+batch_size: 32
+max_num_samples: 1000
+
+pretrained_path: /home/s204790/dynamical-pde-diffusion/pretrained_models/5gf2x0m8/ema_model.pth
+test_data_path: data/llg_no_time_test.hdf5

@@ -12,6 +12,12 @@ class no_op:
     def __exit__(self, exc_type, exc_value, traceback):
         pass
 
+def X_and_dXdt_dummy(net, x, sigma, labels, **kwargs):
+    out = net(x, sigma, labels, **kwargs)
+    dudt_dummy = torch.zeros_like(out)
+    return out, dudt_dummy
+
+
 def X_and_dXdt_fd(net, x, sigma, labels, eps=1e-5, no_grad=True, **kwargs):
     """
     Compute the output of the network and its derivative with respect to time t.
@@ -39,9 +45,7 @@ def X_and_dXdt_fd(net, x, sigma, labels, eps=1e-5, no_grad=True, **kwargs):
     """
 
     if labels is None:
-        u0 = net(x, sigma, labels, **kwargs)
-        dudt_fd = torch.zeros_like(u0)
-        return u0, dudt_fd
+        return X_and_dXdt_dummy(net, x, sigma, labels, **kwargs)
     
     lbl_p = labels.detach().clone(); lbl_m = labels.detach().clone()
     lbl_p[:, 0] += eps
@@ -132,6 +136,14 @@ def laplacian(u, dx):
 
 class Sampler(ABC):
     """
+    Abstract base class for samplers.
+    """
+    #@abstractmethod
+    #def sample(self, *args, **kwargs):
+    #    ...
+
+class UnconditionalSampler(Sampler):
+    """
     Sampler class for EDM style sampling.
     
     Parameters
@@ -162,7 +174,6 @@ class Sampler(ABC):
         sigma_min=0.002,
         sigma_max=80.0,
         rho=7.0,
-        out_and_grad_fn=X_and_dXdt_fd,
     ):
         self.net = net
         self.device = device
@@ -173,7 +184,6 @@ class Sampler(ABC):
         self.sigma_min = sigma_min
         self.sigma_max = sigma_max
         self.rho = rho
-        self.out_and_grad_fun = out_and_grad_fn
 
         self.dtype_f = torch.float32     # net runs in fp32
         self.dtype_t = torch.float64     # keep time grid in fp64 for stability, as in EDM
@@ -217,28 +227,140 @@ class Sampler(ABC):
         for i, (sigma_cur, sigma_next) in enumerate(zip(sigmas[:-1], sigmas[1:])):  # i = 0..N-1
             x_cur = x_next
             # Euler step to t_next
-            x_N, dxdt = self.out_and_grad_fun(self.net, x_cur.to(dt_f), torch.full((B,), sigma_cur, device=self.device, dtype=dt_f), *args)
+            x_N = self.net(x_cur.to(dt_f), torch.full((B,), sigma_cur, device=self.device, dtype=dt_f), *args).to(dt_t)
+            d_cur = (x_cur - x_N) / sigma_cur
+            x_next = x_cur + (sigma_next - sigma_cur) * d_cur
+            # Heun (2nd-order) correction unless final step
+            if i < num_steps - 1:
+                x_N = self.net(x_next.to(dt_f), torch.full((B,), sigma_next, device=self.device, dtype=dt_f), *args).to(dt_t)
+                d_prime = (x_next - x_N) / sigma_next
+                x_next = x_cur + (sigma_next - sigma_cur) * (0.5 * d_cur + 0.5 * d_prime)
+
+        return x_next.to(dt_f).detach().cpu()
+
+
+
+class JointSampler(Sampler):
+
+    def __init__(
+        self,
+        net,
+        device,
+        sample_shape,
+        num_channels,
+        num_samples,
+        ch_a,
+        loss_fn,
+        loss_kwargs,
+        num_steps=18,
+        sigma_min=0.002,
+        sigma_max=80.0,
+        rho=7.0,
+        out_and_grad_fn=X_and_dXdt_fd,
+    ):
+        self.net = net
+        self.device = device
+        self.sample_shape = sample_shape
+        self.num_channels = num_channels
+        self.num_samples = num_samples
+        self.ch_a = ch_a
+        self.loss_fn = loss_fn
+        self.loss_kwargs = loss_kwargs
+        self.num_steps = num_steps
+        self.sigma_min = sigma_min
+        self.sigma_max = sigma_max
+        self.rho = rho
+        self.out_and_grad_fun = out_and_grad_fn
+
+        self.dtype_f = torch.float32     # net runs in fp32
+        self.dtype_t = torch.float64     # keep time grid in fp64 for stability, as in EDM
+
+    def sample(
+        self,
+        labels,
+        obs_a,
+        obs_u,
+        mask_a,
+        mask_u,
+        zeta_a,
+        zeta_u,
+        zeta_pde,
+        return_losses=False,
+        num_steps=None,
+        sigma_min=None,
+        sigma_max=None,
+        rho=None,
+    ):
+        dt_f = self.dtype_f
+        dt_t = self.dtype_t
+
+        obs_u, mask_u = obs_u.to(device=self.device, dtype=dt_t), mask_u.to(device=self.device, dtype=dt_t)
+        obs_a, mask_a = obs_a.to(device=self.device, dtype=dt_t), mask_a.to(device=self.device, dtype=dt_t)
+
+        num_steps = num_steps if num_steps is not None else self.num_steps
+        sigma_min = sigma_min if sigma_min is not None else self.sigma_min
+        sigma_max = sigma_max if sigma_max is not None else self.sigma_max
+        rho = rho if rho is not None else self.rho
+
+        step_idx = torch.arange(num_steps, dtype=dt_t, device=self.device)
+        sigmas = (sigma_max**(1.0/rho) + step_idx/(num_steps-1) * (sigma_min**(1.0/rho) - sigma_max**(1.0/rho)))**rho
+        sigmas = getattr(self.net, "round_sigma", lambda x: x)(sigmas)
+        sigmas = torch.cat([sigmas, torch.zeros_like(sigmas[:1])])  # length N+1, last = 0
+
+        B = labels.shape[0] if labels is not None else self.num_samples
+        if labels is not None:
+            labels = labels.to(device=self.device, dtype=dt_f)
+        
+        latents = torch.randn((B, self.num_channels, *self.sample_shape), device=self.device, dtype=dt_t)
+
+        x_next = (latents.to(self.dtype_t) * sigmas[0])
+
+        losses = torch.zeros((num_steps, 4))  # for debugging
+
+        for i, (sigma_cur, sigma_next) in enumerate(zip(sigmas[:-1], sigmas[1:])):  # i = 0..N-1
+            x_cur = x_next.detach().clone()
+            x_cur.requires_grad = True
+            # Euler step to t_next
+            x_N, dxdt = self.out_and_grad_fun(self.net, x_cur.to(dt_f), torch.full((B,), sigma_cur, device=self.device, dtype=dt_f), labels)
             x_N, dxdt = x_N.to(dt_t), dxdt.to(dt_t)
             
             d_cur = (x_cur - x_N) / sigma_cur
             x_next = x_cur + (sigma_next - sigma_cur) * d_cur
             # Heun (2nd-order) correction unless final step
             if i < num_steps - 1:
-                x_N, dxdt = self.out_and_grad_fun(self.net, x_next.to(dt_f), torch.full((B,), sigma_next, device=self.device, dtype=dt_f), *args)
+                x_N, dxdt = self.out_and_grad_fun(self.net, x_next.to(dt_f), torch.full((B,), sigma_next, device=self.device, dtype=dt_f), labels)
                 x_N, dxdt = x_N.to(dt_t), dxdt.to(dt_t)
                 d_prime = (x_next - x_N) / sigma_next
                 x_next = x_cur + (sigma_next - sigma_cur) * (0.5 * d_cur + 0.5 * d_prime)
 
-        return x_next.to(dt_f).detach().cpu()
-        
+            # observation losses for DPS sampling
+            loss_u = torch.zeros(1, dtype=dt_t, device=self.device)
+            loss_a = torch.zeros(1, dtype=dt_t, device=self.device)
+            if mask_u.sum() > 0:
+                loss_u = torch.sqrt(torch.sum((mask_u * (x_N[:, self.ch_a:, :, :] - obs_u)) ** 2))
+            if mask_a.sum() > 0:
+                loss_a = torch.sqrt(torch.sum((mask_a * (x_N[:, :self.ch_a, :, :] - obs_a)) ** 2))
 
-    @abstractmethod
-    def sample_joint(self, *args, **kwargs):
-        ...
+            # PDE loss for DPS sampling
+            dudt = dxdt[:, self.ch_a:, :, :]
+            u_N = x_N[:, self.ch_a:, :, :]
+            loss_pde = self.loss_fn(u_N, dudt, labels, **self.loss_kwargs)
+            if i <= 0.8 * num_steps:
+                w_a, w_u, w_pde = zeta_a, zeta_u, zeta_pde
+            else:
+                w_a, w_u, w_pde = 0.1 * zeta_a, 0.1 * zeta_u, zeta_pde
+            
+            loss_comb = w_a * loss_a + w_u * loss_u + w_pde * loss_pde
+            grad_x = torch.autograd.grad(loss_comb, x_cur, retain_graph=False)[0]
+            x_next = x_next - grad_x
+            
+            losses[i] = torch.tensor([loss_a.item(), loss_u.item(), loss_pde.item(), loss_comb.item()])        
 
-    @abstractmethod
-    def sample_forward(self, *args, **kwargs):
-        ...
+        # Return at sigma=0 in fp32
+        x = x_next.to(dt_f).detach().cpu()
+
+        losses = losses.detach().cpu().numpy() if return_losses else None        
+        return x, losses
 
     
 class EDMHeatSampler(Sampler):
@@ -495,37 +617,6 @@ class EDMHeatSampler(Sampler):
 
         losses = losses.detach().cpu().numpy() if return_losses else None
         return x, losses
-
-
-class JointSampler(Sampler):
-    def __init__(
-        self,
-        net,
-        device,
-        sample_shape,
-        num_channels,
-        num_samples,
-        loss_fn,
-        loss_kwargs,
-        num_steps=18,
-        sigma_min=0.002,
-        sigma_max=80.0,
-        rho=7.0,
-    ):
-        super().__init__(
-            net,
-            device,
-            sample_shape,
-            num_channels,
-            num_samples,
-            num_steps,
-            sigma_min,
-            sigma_max,
-            rho,
-    )
-        self.loss_fn = loss_fn
-        self.loss_kwargs = loss_kwargs
-
     
 
 class sampling_context:

@@ -13,7 +13,7 @@ net:
   label_ch: 4   # 3 for external field + 1 for time
 
 training:
-  batch_size: 32
+  batch_size: 64
   shuffle: True
   num_epochs: 1000
   learning_rate: 1e-4
@@ -22,6 +22,7 @@ training:
   physics_loss_coeff: 1.0
   gradient_clipping: 1.0
   val_interval: 10
+  val_percent: 0.1
   checkpoint_interval: 20
   ema_decay: 0.999
   ema_warmup: 20

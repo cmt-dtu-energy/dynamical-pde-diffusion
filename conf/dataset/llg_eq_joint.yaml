@@ -15,7 +15,7 @@ net:
 training:
   batch_size: 64
   shuffle: True
-  num_epochs: 700
+  num_epochs: 1000
   learning_rate: 1e-4
   weight_decay: 0.0
   physics_loss: false

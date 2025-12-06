@@ -68,6 +68,53 @@ def heat_loss(x, dxdt, obs_a, obs_u, mask_a, mask_u, dx, dy, ch_a, labels):
 
     return loss_pde, loss_obs_a, loss_obs_u
 
+def heat_loss2(u, dudt, labels, dx):
+    """
+    Heat equation loss, alternative signature.
+    
+    Parameters
+    ----------
+    u : torch.Tensor
+        Current state tensor of shape (B, 1, H, W).
+    dudt : torch.Tensor
+        Time derivative of u, tensor of shape (B, 1, H, W).
+    labels : torch.Tensor
+        labels tensor, where final item in dim 1 corresponds to the diffusion coefficient, ie labels[:, -1].
+    dx : float
+        Spatial grid size in x-direction.
+
+    Returns
+    -------
+    loss_pde : torch.Tensor
+        PDE loss component, shape (1,)
+    """
+    alpha = labels[:, -1].view(u.shape[0], 1, 1, 1)  # Reshape to (B, 1, 1, 1) for broadcasting
+    laplacian_u = laplacian(u, dx)
+
+    loss_pde = torch.sqrt(torch.sum((dudt - alpha * laplacian_u) ** 2) / (u.shape[-1] * u.shape[-2]))
+
+    return loss_pde
+
+
+def llg_loss2(m, dmdt, labels, *args):
+    """
+    llg soft constraint loss, alternative signature.
+
+    Parameters
+    ----------
+    m : torch.Tensor
+        Magnetization vector of shape (B, 3, H, W).
+    dmdt : torch.Tensor
+        Time derivative of m, tensor of shape (B, 3, H, W).
+
+    Returns
+    -------
+    loss_pde : torch.Tensor
+        Soft constraint loss enforcing |m| = 1, shape (1,)
+    """
+    norm = torch.linalg.norm(m, dim=1)
+    loss_pde = torch.sqrt(torch.sum((1 - norm) ** 2)) / (m.shape[2] * m.shape[3])  # normalize by spatial size
+    return loss_pde
 
 def llg_loss(
     x, dxdt, obs_a, obs_u, mask_a, mask_u, dx, dy, ch_a, labels, cuda: bool = True
